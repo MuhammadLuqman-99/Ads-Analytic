@@ -1,7 +1,6 @@
 "use client"
 
 import { RefreshCw, DollarSign, Eye, MousePointer, ShoppingCart, TrendingUp } from "lucide-react"
-import Sidebar from "@/components/Sidebar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { SpendOverTimeChart } from "@/components/charts/SpendOverTimeChart"
@@ -26,21 +25,21 @@ function MetricsCard({
     iconColor: string
 }) {
     return (
-        <Card>
+        <Card className="bg-white border-slate-200">
             <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                     <div className={`p-3 rounded-xl bg-gradient-to-br ${iconColor} shadow-lg`}>
                         <Icon className="h-5 w-5 text-white" />
                     </div>
-                    <div className={`flex items-center gap-1 text-sm font-medium ${changeType === 'positive' ? 'text-emerald-400' : 'text-rose-400'
+                    <div className={`flex items-center gap-1 text-sm font-medium ${changeType === 'positive' ? 'text-emerald-600' : 'text-rose-600'
                         }`}>
                         {changeType === 'positive' ? '↑' : '↓'}
                         {Math.abs(change)}%
                     </div>
                 </div>
                 <div className="mt-4">
-                    <p className="text-sm font-medium text-slate-400">{title}</p>
-                    <p className="mt-1 text-2xl font-bold text-white">{value}</p>
+                    <p className="text-sm font-medium text-slate-500">{title}</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
                 </div>
             </CardContent>
         </Card>
@@ -52,25 +51,14 @@ export default function DashboardPage() {
     const syncMutation = useSyncAllAccounts()
 
     return (
-        <div className="min-h-screen bg-slate-900">
-            <Sidebar />
-
-            <main className="lg:pl-72">
-                <div className="px-4 sm:px-6 lg:px-8 py-8">
+        <div>
                     {/* Header */}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
                         <div>
-                            <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-                            <p className="mt-1 text-slate-400">Overview of your ad performance across all platforms</p>
+                            <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
+                            <p className="mt-1 text-slate-500">Overview of your ad performance across all platforms</p>
                         </div>
                         <div className="flex items-center gap-3">
-                            <select className="bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors">
-                                <option>Last 7 days</option>
-                                <option>Last 14 days</option>
-                                <option>Last 30 days</option>
-                                <option>This month</option>
-                                <option>Last month</option>
-                            </select>
                             <Button
                                 onClick={() => syncMutation.mutate()}
                                 disabled={syncMutation.isPending}
@@ -85,11 +73,11 @@ export default function DashboardPage() {
                     {isLoading ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
                             {[...Array(5)].map((_, i) => (
-                                <Card key={i} className="animate-pulse">
+                                <Card key={i} className="animate-pulse bg-white">
                                     <CardContent className="p-6">
-                                        <div className="h-12 w-12 bg-slate-700 rounded-xl mb-4" />
-                                        <div className="h-4 w-20 bg-slate-700 rounded mb-2" />
-                                        <div className="h-6 w-32 bg-slate-700 rounded" />
+                                        <div className="h-12 w-12 bg-slate-200 rounded-xl mb-4" />
+                                        <div className="h-4 w-20 bg-slate-200 rounded mb-2" />
+                                        <div className="h-6 w-32 bg-slate-200 rounded" />
                                     </CardContent>
                                 </Card>
                             ))}
@@ -146,12 +134,12 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Platform Summary */}
-                    <Card>
-                        <CardHeader className="border-b border-slate-700/50">
-                            <CardTitle>Platform Summary</CardTitle>
+                    <Card className="bg-white border-slate-200">
+                        <CardHeader className="border-b border-slate-200">
+                            <CardTitle className="text-slate-900">Platform Summary</CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
-                            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-700/50">
+                            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200">
                                 {/* Meta */}
                                 <div className="p-6">
                                     <div className="flex items-center gap-3 mb-4">
@@ -159,22 +147,22 @@ export default function DashboardPage() {
                                             M
                                         </div>
                                         <div>
-                                            <p className="font-semibold text-white">Meta Ads</p>
-                                            <p className="text-xs text-slate-400">Facebook & Instagram</p>
+                                            <p className="font-semibold text-slate-900">Meta Ads</p>
+                                            <p className="text-xs text-slate-500">Facebook & Instagram</p>
                                         </div>
                                     </div>
                                     <div className="space-y-2">
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">Spend</span>
-                                            <span className="text-white font-medium">RM 12,450</span>
+                                            <span className="text-slate-500">Spend</span>
+                                            <span className="text-slate-900 font-medium">RM 12,450</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">Conversions</span>
-                                            <span className="text-white font-medium">892</span>
+                                            <span className="text-slate-500">Conversions</span>
+                                            <span className="text-slate-900 font-medium">892</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">ROAS</span>
-                                            <span className="text-emerald-400 font-medium">3.2x</span>
+                                            <span className="text-slate-500">ROAS</span>
+                                            <span className="text-emerald-600 font-medium">3.2x</span>
                                         </div>
                                     </div>
                                 </div>
@@ -182,26 +170,26 @@ export default function DashboardPage() {
                                 {/* TikTok */}
                                 <div className="p-6">
                                     <div className="flex items-center gap-3 mb-4">
-                                        <div className="h-10 w-10 rounded-lg bg-black flex items-center justify-center text-white font-bold border border-slate-700">
+                                        <div className="h-10 w-10 rounded-lg bg-black flex items-center justify-center text-white font-bold">
                                             T
                                         </div>
                                         <div>
-                                            <p className="font-semibold text-white">TikTok Ads</p>
-                                            <p className="text-xs text-slate-400">TikTok for Business</p>
+                                            <p className="font-semibold text-slate-900">TikTok Ads</p>
+                                            <p className="text-xs text-slate-500">TikTok for Business</p>
                                         </div>
                                     </div>
                                     <div className="space-y-2">
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">Spend</span>
-                                            <span className="text-white font-medium">RM 8,234</span>
+                                            <span className="text-slate-500">Spend</span>
+                                            <span className="text-slate-900 font-medium">RM 8,234</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">Conversions</span>
-                                            <span className="text-white font-medium">645</span>
+                                            <span className="text-slate-500">Conversions</span>
+                                            <span className="text-slate-900 font-medium">645</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">ROAS</span>
-                                            <span className="text-emerald-400 font-medium">2.8x</span>
+                                            <span className="text-slate-500">ROAS</span>
+                                            <span className="text-emerald-600 font-medium">2.8x</span>
                                         </div>
                                     </div>
                                 </div>
@@ -213,30 +201,28 @@ export default function DashboardPage() {
                                             S
                                         </div>
                                         <div>
-                                            <p className="font-semibold text-white">Shopee Ads</p>
-                                            <p className="text-xs text-slate-400">Shopee Marketing</p>
+                                            <p className="font-semibold text-slate-900">Shopee Ads</p>
+                                            <p className="text-xs text-slate-500">Shopee Marketing</p>
                                         </div>
                                     </div>
                                     <div className="space-y-2">
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">Spend</span>
-                                            <span className="text-white font-medium">RM 3,852</span>
+                                            <span className="text-slate-500">Spend</span>
+                                            <span className="text-slate-900 font-medium">RM 3,852</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">Conversions</span>
-                                            <span className="text-white font-medium">310</span>
+                                            <span className="text-slate-500">Conversions</span>
+                                            <span className="text-slate-900 font-medium">310</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-slate-400">ROAS</span>
-                                            <span className="text-emerald-400 font-medium">4.1x</span>
+                                            <span className="text-slate-500">ROAS</span>
+                                            <span className="text-emerald-600 font-medium">4.1x</span>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
-                </div>
-            </main>
         </div>
     )
 }
