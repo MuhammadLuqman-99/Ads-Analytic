@@ -32,7 +32,25 @@ const (
 	campaignFields = "id,name,objective,status,daily_budget,lifetime_budget,start_time,end_time,created_time,updated_time"
 	adSetFields    = "id,name,status,daily_budget,lifetime_budget,bid_amount,billing_event,optimization_goal,targeting,start_time,end_time"
 	adFields       = "id,name,status,creative{id,name,title,body,call_to_action_type,image_url,video_id,thumbnail_url,link_url}"
-	insightFields  = "impressions,reach,clicks,unique_clicks,spend,actions,conversions,purchase_roas,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions"
+	insightFields  = "impressions,reach,clicks,unique_clicks,spend,actions,conversions,purchase_roas,cost_per_action_type,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions"
+
+	// Extended insight fields for comprehensive metrics
+	extendedInsightFields = "impressions,reach,frequency,clicks,unique_clicks,ctr,cpc,cpm,cpp,spend,actions,action_values,conversions,conversion_values,cost_per_action_type,cost_per_conversion,purchase_roas,website_purchase_roas,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions,video_avg_time_watched_actions"
+
+	// Meta error codes
+	MetaErrorCodeTokenExpired   = 190
+	MetaErrorCodeRateLimit      = 17
+	MetaErrorCodePermission     = 10
+	MetaErrorCodeInvalidParam   = 100
+	MetaErrorCodeUserThrottled  = 4
+	MetaErrorCodeAppThrottled   = 613
+	MetaErrorCodeReportTimeout  = 2601
+	MetaErrorCodeAsyncJobFailed = 2602
+
+	// Async report polling
+	asyncReportPollInterval = 5 * time.Second
+	asyncReportMaxWait      = 10 * time.Minute
+	largeDateRangeThreshold = 93 // Days - use async for >93 days
 )
 
 // Connector implements the PlatformConnector interface for Meta (Facebook) Ads
@@ -40,6 +58,41 @@ type Connector struct {
 	*platform.BaseConnector
 	config     *Config
 	apiVersion string
+
+	// Rate limit tracking from X-Business-Use-Case-Usage header
+	rateLimitInfo *MetaRateLimitInfo
+}
+
+// MetaRateLimitInfo tracks rate limit from X-Business-Use-Case-Usage header
+type MetaRateLimitInfo struct {
+	CallCount                int     `json:"call_count"`
+	TotalCPUTime             int     `json:"total_cputime"`
+	TotalTime                int     `json:"total_time"`
+	EstimatedTimeToRegain    int     `json:"estimated_time_to_regain_access"`
+	Type                     string  `json:"type"`
+	AccIDUtilPct             float64 `json:"acc_id_util_pct"`
+	AdsInsightsThrottlePct   float64 `json:"ads_insights_throttle_pct"`
+	AdsManagementThrottlePct float64 `json:"ads_management_throttle_pct"`
+}
+
+// MetaError represents a Meta API error response
+type MetaError struct {
+	Code       int    `json:"code"`
+	Subcode    int    `json:"error_subcode"`
+	Message    string `json:"message"`
+	Type       string `json:"type"`
+	FBTraceID  string `json:"fbtrace_id"`
+	IsTransient bool  `json:"is_transient"`
+}
+
+// AsyncReportStatus represents the status of an async insights report
+type AsyncReportStatus struct {
+	ID                 string  `json:"id"`
+	AccountID          string  `json:"account_id"`
+	TimeRef            int64   `json:"time_ref"`
+	AsyncStatus        string  `json:"async_status"`
+	AsyncPercentComplete int   `json:"async_percent_completion"`
+	ResultURL          string  `json:"result_url,omitempty"`
 }
 
 // Config holds Meta-specific configuration
@@ -736,25 +789,74 @@ type metaAd struct {
 }
 
 type metaInsight struct {
-	DateStart    string `json:"date_start"`
-	DateStop     string `json:"date_stop"`
+	// Object identifiers (when fetched at account level with level=campaign/adset/ad)
+	CampaignID   string `json:"campaign_id,omitempty"`
+	CampaignName string `json:"campaign_name,omitempty"`
+	AdSetID      string `json:"adset_id,omitempty"`
+	AdSetName    string `json:"adset_name,omitempty"`
+	AdID         string `json:"ad_id,omitempty"`
+	AdName       string `json:"ad_name,omitempty"`
+	AccountID    string `json:"account_id,omitempty"`
+
+	// Date range
+	DateStart string `json:"date_start"`
+	DateStop  string `json:"date_stop"`
+
+	// Core metrics
 	Impressions  string `json:"impressions"`
 	Reach        string `json:"reach"`
+	Frequency    string `json:"frequency,omitempty"`
 	Clicks       string `json:"clicks"`
 	UniqueClicks string `json:"unique_clicks"`
 	Spend        string `json:"spend"`
-	Actions      []struct {
+
+	// Pre-calculated metrics from API
+	CTR string `json:"ctr,omitempty"`
+	CPC string `json:"cpc,omitempty"`
+	CPM string `json:"cpm,omitempty"`
+	CPP string `json:"cpp,omitempty"` // Cost per 1000 people reached
+
+	// Actions (engagement, conversions, etc.)
+	Actions []struct {
 		ActionType string `json:"action_type"`
 		Value      string `json:"value"`
 	} `json:"actions"`
+	ActionValues []struct {
+		ActionType string `json:"action_type"`
+		Value      string `json:"value"`
+	} `json:"action_values,omitempty"`
+
+	// Conversions
 	Conversions []struct {
 		ActionType string `json:"action_type"`
 		Value      string `json:"value"`
 	} `json:"conversions"`
+	ConversionValues []struct {
+		ActionType string `json:"action_type"`
+		Value      string `json:"value"`
+	} `json:"conversion_values,omitempty"`
+
+	// Cost per action
+	CostPerActionType []struct {
+		ActionType string `json:"action_type"`
+		Value      string `json:"value"`
+	} `json:"cost_per_action_type,omitempty"`
+	CostPerConversion []struct {
+		ActionType string `json:"action_type"`
+		Value      string `json:"value"`
+	} `json:"cost_per_conversion,omitempty"`
+
+	// ROAS
 	PurchaseROAS []struct {
 		ActionType string `json:"action_type"`
 		Value      string `json:"value"`
 	} `json:"purchase_roas"`
+	WebsitePurchaseROAS []struct {
+		ActionType string `json:"action_type"`
+		Value      string `json:"value"`
+	} `json:"website_purchase_roas,omitempty"`
+
+	// Video metrics
 	VideoP25WatchedActions []struct {
 		ActionType string `json:"action_type"`
 		Value      string `json:"value"`
@@ -771,6 +873,10 @@ type metaInsight struct {
 		ActionType string `json:"action_type"`
 		Value      string `json:"value"`
 	} `json:"video_p100_watched_actions"`
+	VideoAvgTimeWatchedActions []struct {
+		ActionType string `json:"action_type"`
+		Value      string `json:"value"`
+	} `json:"video_avg_time_watched_actions,omitempty"`
 }
 
 // ============================================================================
@@ -1048,13 +1154,17 @@ func (c *Connector) mapCampaignStatus(status string) entity.CampaignStatus {
 		return entity.CampaignStatusDeleted
 	case "ARCHIVED":
 		return entity.CampaignStatusArchived
-	default:
+	case "DRAFT":
 		return entity.CampaignStatusDraft
+	default:
+		// Unknown statuses default to paused for safety
+		return entity.CampaignStatusPaused
 	}
 }
 
 func (c *Connector) mapObjective(objective string) entity.CampaignObjective {
 	switch strings.ToUpper(objective) {
+	// New Meta OUTCOME_* objectives (API v18+)
 	case "OUTCOME_AWARENESS":
 		return entity.ObjectiveAwareness
 	case "OUTCOME_TRAFFIC":
@@ -1067,8 +1177,32 @@ func (c *Connector) mapObjective(objective string) entity.CampaignObjective {
 		return entity.ObjectiveAppPromotion
 	case "OUTCOME_SALES":
 		return entity.ObjectiveSales
-	default:
+
+	// Legacy Meta objectives (still returned by some campaigns)
+	case "BRAND_AWARENESS", "REACH":
+		return entity.ObjectiveAwareness
+	case "LINK_CLICKS":
+		return entity.ObjectiveTraffic
+	case "POST_ENGAGEMENT", "PAGE_LIKES", "EVENT_RESPONSES":
+		return entity.ObjectiveEngagement
+	case "LEAD_GENERATION":
+		return entity.ObjectiveLeads
+	case "APP_INSTALLS":
+		return entity.ObjectiveAppPromotion
+	case "CONVERSIONS":
 		return entity.ObjectiveConversions
+	case "CATALOG_SALES", "PRODUCT_CATALOG_SALES":
+		return entity.ObjectiveSales
+	case "VIDEO_VIEWS":
+		return entity.ObjectiveVideoViews
+	case "MESSAGES":
+		return entity.ObjectiveMessages
+	case "STORE_TRAFFIC", "STORE_VISITS":
+		return entity.ObjectiveStoreTraffic
+
+	default:
+		// Default to awareness for unknown objectives
+		return entity.ObjectiveAwareness
 	}
 }
 
@@ -1091,6 +1225,450 @@ func (c *Connector) sumActionValues(actions []struct {
 		sum += c.parseInt64(a.Value)
 	}
 	return sum
+}
+
+// ============================================================================
+// Rate Limit Methods
+// ============================================================================
+
+// ParseRateLimitHeaders parses Meta's X-Business-Use-Case-Usage header
+func (c *Connector) ParseRateLimitHeaders(headers map[string][]string) *MetaRateLimitInfo {
+	usageHeader := ""
+	for k, v := range headers {
+		if strings.EqualFold(k, "X-Business-Use-Case-Usage") && len(v) > 0 {
+			usageHeader = v[0]
+			break
+		}
+	}
+
+	if usageHeader == "" {
+		return nil
+	}
+
+	// X-Business-Use-Case-Usage format: {"app_id":{"call_count":..., "total_cputime":...}}
+	var usageMap map[string]map[string]MetaRateLimitInfo
+	if err := json.Unmarshal([]byte(usageHeader), &usageMap); err != nil {
+		return nil
+	}
+
+	// Get the first (and usually only) entry
+	for _, appUsage := range usageMap {
+		for _, info := range appUsage {
+			c.rateLimitInfo = &info
+			return &info
+		}
+	}
+
+	return nil
+}
+
+// IsApproachingRateLimit checks if we're approaching rate limit threshold
+func (c *Connector) IsApproachingRateLimit() bool {
+	if c.rateLimitInfo == nil {
+		return false
+	}
+
+	// Meta throttles at 80% usage - warn at 70%
+	return c.rateLimitInfo.CallCount >= 70 ||
+		c.rateLimitInfo.TotalCPUTime >= 70 ||
+		c.rateLimitInfo.TotalTime >= 70
+}
+
+// GetEstimatedWaitTime returns estimated wait time if rate limited
+func (c *Connector) GetEstimatedWaitTime() time.Duration {
+	if c.rateLimitInfo == nil || c.rateLimitInfo.EstimatedTimeToRegain == 0 {
+		return 0
+	}
+	return time.Duration(c.rateLimitInfo.EstimatedTimeToRegain) * time.Minute
+}
+
+// ============================================================================
+// Enhanced Error Handling
+// ============================================================================
+
+// parseMetaError parses Meta API error from response
+func (c *Connector) parseMetaError(body []byte) (*MetaError, error) {
+	var errResp struct {
+		Error MetaError `json:"error"`
+	}
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		return nil, err
+	}
+	return &errResp.Error, nil
+}
+
+// HandleMetaError handles Meta-specific error codes and returns appropriate error
+func (c *Connector) HandleMetaError(statusCode int, body []byte) error {
+	metaErr, err := c.parseMetaError(body)
+	if err != nil {
+		return errors.NewPlatformAPIError("meta", statusCode, "UNKNOWN", "Failed to parse error response")
+	}
+
+	switch metaErr.Code {
+	case MetaErrorCodeTokenExpired:
+		tokenErr := errors.NewTokenExpiredError("meta", "access", time.Now())
+		tokenErr.AppError.WithMetadata("fb_trace_id", metaErr.FBTraceID)
+		tokenErr.AppError.WithMetadata("error_type", metaErr.Type)
+		return tokenErr
+
+	case MetaErrorCodeRateLimit, MetaErrorCodeUserThrottled, MetaErrorCodeAppThrottled:
+		waitTime := c.GetEstimatedWaitTime()
+		if waitTime == 0 {
+			waitTime = 60 * time.Second
+		}
+		return errors.NewRateLimitError("meta", waitTime)
+
+	case MetaErrorCodePermission:
+		return errors.NewPlatformAPIError("meta", statusCode, strconv.Itoa(metaErr.Code), "Permission denied: "+metaErr.Message)
+
+	case MetaErrorCodeInvalidParam:
+		return errors.ErrValidation(metaErr.Message).WithMetadata("platform", "meta")
+
+	case MetaErrorCodeReportTimeout:
+		return errors.NewPlatformAPIError("meta", statusCode, strconv.Itoa(metaErr.Code), "Report generation timeout - try async report")
+
+	case MetaErrorCodeAsyncJobFailed:
+		return errors.NewPlatformAPIError("meta", statusCode, strconv.Itoa(metaErr.Code), "Async job failed: "+metaErr.Message)
+
+	default:
+		platformErr := errors.NewPlatformAPIError("meta", statusCode, strconv.Itoa(metaErr.Code), metaErr.Message)
+		if metaErr.IsTransient {
+			platformErr.WithMetadata("is_transient", "true")
+		}
+		return platformErr
+	}
+}
+
+// ============================================================================
+// Async Report Methods for Large Date Ranges
+// ============================================================================
+
+// GetAccountInsightsAsync creates an async report for large date ranges
+func (c *Connector) GetAccountInsightsAsync(ctx context.Context, accessToken string, adAccountID string, dateRange entity.DateRange, level string) ([]metaInsight, error) {
+	// Step 1: Create async job
+	endpoint := fmt.Sprintf("%s/%s/act_%s/insights", baseURL, c.apiVersion, adAccountID)
+
+	params := map[string]string{
+		"fields":         extendedInsightFields,
+		"time_range":     c.formatTimeRange(dateRange),
+		"time_increment": "1",
+		"level":          level,
+		"access_token":   accessToken,
+	}
+
+	// POST to create async job
+	resp, err := c.DoPost(ctx, endpoint, c.BuildAuthHeader(accessToken), params)
+	if err != nil {
+		return nil, err
+	}
+
+	var jobResp struct {
+		ReportRunID string `json:"report_run_id"`
+	}
+	if err := c.ParseJSON(resp.Body, &jobResp); err != nil {
+		return nil, err
+	}
+
+	// Step 2: Poll for completion
+	insights, err := c.pollAsyncReport(ctx, accessToken, jobResp.ReportRunID)
+	if err != nil {
+		return nil, err
+	}
+
+	return insights, nil
+}
+
+// pollAsyncReport polls an async report until completion
+func (c *Connector) pollAsyncReport(ctx context.Context, accessToken string, reportRunID string) ([]metaInsight, error) {
+	endpoint := fmt.Sprintf("%s/%s/%s", baseURL, c.apiVersion, reportRunID)
+	deadline := time.Now().Add(asyncReportMaxWait)
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(asyncReportPollInterval):
+		}
+
+		resp, err := c.DoGet(ctx, endpoint, c.BuildAuthHeader(accessToken), map[string]string{
+			"fields": "async_status,async_percent_completion",
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		var status AsyncReportStatus
+		if err := c.ParseJSON(resp.Body, &status); err != nil {
+			return nil, err
+		}
+
+		switch status.AsyncStatus {
+		case "Job Completed":
+			// Fetch results
+			return c.fetchAsyncReportResults(ctx, accessToken, reportRunID)
+
+		case "Job Failed":
+			return nil, errors.NewPlatformAPIError("meta", 500, "ASYNC_FAILED", "Async report job failed")
+
+		case "Job Running", "Job Not Started":
+			// Continue polling
+			continue
+
+		default:
+			// Unknown status, continue polling
+			continue
+		}
+	}
+
+	return nil, errors.NewPlatformAPIError("meta", 504, "TIMEOUT", "Async report timed out")
+}
+
+// fetchAsyncReportResults fetches results from completed async report
+func (c *Connector) fetchAsyncReportResults(ctx context.Context, accessToken string, reportRunID string) ([]metaInsight, error) {
+	endpoint := fmt.Sprintf("%s/%s/%s/insights", baseURL, c.apiVersion, reportRunID)
+
+	var allInsights []metaInsight
+	cursor := ""
+
+	for {
+		params := map[string]string{"limit": "500"}
+		if cursor != "" {
+			params["after"] = cursor
+		}
+
+		resp, err := c.DoGet(ctx, endpoint, c.BuildAuthHeader(accessToken), params)
+		if err != nil {
+			return allInsights, err
+		}
+
+		var pageResp struct {
+			Data   []metaInsight       `json:"data"`
+			Paging platform.PagingInfo `json:"paging"`
+		}
+		if err := c.ParseJSON(resp.Body, &pageResp); err != nil {
+			return allInsights, err
+		}
+
+		allInsights = append(allInsights, pageResp.Data...)
+
+		if pageResp.Paging.Next == "" {
+			break
+		}
+		cursor = pageResp.Paging.Cursors.After
+	}
+
+	return allInsights, nil
+}
+
+// ============================================================================
+// Enhanced Insights Methods
+// ============================================================================
+
+// InsightsParams holds parameters for fetching insights
+type InsightsParams struct {
+	DateRange      entity.DateRange
+	Level          string   // "campaign", "adset", "ad", "account"
+	DatePreset     string   // "today", "yesterday", "this_month", "last_7d", "last_30d", etc.
+	TimeIncrement  string   // "1" (daily), "7" (weekly), "monthly", "all_days"
+	Fields         []string // Custom fields to fetch
+	Breakdowns     []string // "age", "gender", "country", "placement", etc.
+	ActionBreakdowns []string // "action_type", "action_device"
+	Filtering      []InsightFilter
+	UseAsync       bool
+}
+
+// InsightFilter represents a filter for insights
+type InsightFilter struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+}
+
+// GetInsightsWithParams fetches insights with comprehensive parameters
+func (c *Connector) GetInsightsWithParams(ctx context.Context, accessToken string, objectID string, params InsightsParams) ([]metaInsight, error) {
+	// Determine if async is needed based on date range
+	daysDiff := int(params.DateRange.EndDate.Sub(params.DateRange.StartDate).Hours() / 24)
+	useAsync := params.UseAsync || daysDiff > largeDateRangeThreshold
+
+	endpoint := fmt.Sprintf("%s/%s/%s/insights", baseURL, c.apiVersion, objectID)
+
+	// Build query params
+	queryParams := map[string]string{
+		"level": params.Level,
+	}
+
+	// Date range or preset
+	if params.DatePreset != "" {
+		queryParams["date_preset"] = params.DatePreset
+	} else {
+		queryParams["time_range"] = c.formatTimeRange(params.DateRange)
+	}
+
+	// Time increment
+	if params.TimeIncrement != "" {
+		queryParams["time_increment"] = params.TimeIncrement
+	} else {
+		queryParams["time_increment"] = "1" // Default daily
+	}
+
+	// Fields
+	if len(params.Fields) > 0 {
+		queryParams["fields"] = strings.Join(params.Fields, ",")
+	} else {
+		queryParams["fields"] = extendedInsightFields
+	}
+
+	// Breakdowns
+	if len(params.Breakdowns) > 0 {
+		queryParams["breakdowns"] = strings.Join(params.Breakdowns, ",")
+	}
+
+	// Action breakdowns
+	if len(params.ActionBreakdowns) > 0 {
+		queryParams["action_breakdowns"] = strings.Join(params.ActionBreakdowns, ",")
+	}
+
+	// Filtering
+	if len(params.Filtering) > 0 {
+		filterJSON, _ := json.Marshal(params.Filtering)
+		queryParams["filtering"] = string(filterJSON)
+	}
+
+	// Use async for large date ranges
+	if useAsync {
+		return c.getInsightsAsync(ctx, accessToken, endpoint, queryParams)
+	}
+
+	return c.getInsightsSync(ctx, accessToken, endpoint, queryParams)
+}
+
+// getInsightsSync fetches insights synchronously (for small date ranges)
+func (c *Connector) getInsightsSync(ctx context.Context, accessToken string, endpoint string, params map[string]string) ([]metaInsight, error) {
+	var allInsights []metaInsight
+	cursor := ""
+
+	for {
+		pageParams := make(map[string]string)
+		for k, v := range params {
+			pageParams[k] = v
+		}
+		pageParams["limit"] = "500"
+		if cursor != "" {
+			pageParams["after"] = cursor
+		}
+
+		resp, err := c.DoGet(ctx, endpoint, c.BuildAuthHeader(accessToken), pageParams)
+		if err != nil {
+			// Check if it's a rate limit error
+			if resp != nil {
+				c.ParseRateLimitHeaders(resp.Headers)
+			}
+			return allInsights, err
+		}
+
+		// Parse rate limit headers
+		c.ParseRateLimitHeaders(resp.Headers)
+
+		var pageResp struct {
+			Data   []metaInsight       `json:"data"`
+			Paging platform.PagingInfo `json:"paging"`
+		}
+		if err := c.ParseJSON(resp.Body, &pageResp); err != nil {
+			return allInsights, err
+		}
+
+		allInsights = append(allInsights, pageResp.Data...)
+
+		if pageResp.Paging.Next == "" {
+			break
+		}
+		cursor = pageResp.Paging.Cursors.After
+
+		// Check rate limit before next request
+		if c.IsApproachingRateLimit() {
+			waitTime := c.GetEstimatedWaitTime()
+			if waitTime > 0 {
+				select {
+				case <-ctx.Done():
+					return allInsights, ctx.Err()
+				case <-time.After(waitTime):
+				}
+			}
+		}
+	}
+
+	return allInsights, nil
+}
+
+// getInsightsAsync fetches insights asynchronously (for large date ranges)
+func (c *Connector) getInsightsAsync(ctx context.Context, accessToken string, endpoint string, params map[string]string) ([]metaInsight, error) {
+	// Add access_token for POST
+	params["access_token"] = accessToken
+
+	// Create async job via POST
+	resp, err := c.DoPost(ctx, endpoint, c.BuildAuthHeader(accessToken), params)
+	if err != nil {
+		return nil, err
+	}
+
+	var jobResp struct {
+		ReportRunID string `json:"report_run_id"`
+	}
+	if err := c.ParseJSON(resp.Body, &jobResp); err != nil {
+		return nil, err
+	}
+
+	// Poll for completion
+	return c.pollAsyncReport(ctx, accessToken, jobResp.ReportRunID)
+}
+
+// ============================================================================
+// Batch Insights for Multiple Campaigns
+// ============================================================================
+
+// GetBatchCampaignInsights fetches insights for multiple campaigns efficiently
+func (c *Connector) GetBatchCampaignInsights(ctx context.Context, accessToken string, adAccountID string, campaignIDs []string, dateRange entity.DateRange) (map[string][]entity.CampaignMetricsDaily, error) {
+	results := make(map[string][]entity.CampaignMetricsDaily)
+
+	// Use ad account level with campaign filtering for efficiency
+	endpoint := fmt.Sprintf("%s/%s/act_%s/insights", baseURL, c.apiVersion, adAccountID)
+
+	params := map[string]string{
+		"fields":         extendedInsightFields,
+		"time_range":     c.formatTimeRange(dateRange),
+		"time_increment": "1",
+		"level":          "campaign",
+		"limit":          "500",
+	}
+
+	// Add campaign filter if specific campaigns requested
+	if len(campaignIDs) > 0 {
+		filterJSON, _ := json.Marshal([]map[string]string{
+			{
+				"field":    "campaign.id",
+				"operator": "IN",
+				"value":    "[" + strings.Join(campaignIDs, ",") + "]",
+			},
+		})
+		params["filtering"] = string(filterJSON)
+	}
+
+	insights, err := c.getInsightsSync(ctx, accessToken, endpoint, params)
+	if err != nil {
+		return results, err
+	}
+
+	// Group by campaign
+	for _, insight := range insights {
+		campaignID := insight.CampaignID
+		if campaignID == "" {
+			continue
+		}
+		metric := c.mapCampaignInsight(insight, campaignID)
+		results[campaignID] = append(results[campaignID], metric)
+	}
+
+	return results, nil
 }
 
 // Ensure Connector implements PlatformConnector interface

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
 	"github.com/google/uuid"
@@ -284,6 +285,181 @@ type TokenRefreshLogRepository interface {
 
 	// DeleteOld deletes logs older than the specified days
 	DeleteOld(ctx context.Context, olderThanDays int) error
+}
+
+// SyncStateRepository defines the interface for sync state data persistence
+type SyncStateRepository interface {
+	// Create creates a new sync state
+	Create(ctx context.Context, state *entity.SyncState) error
+
+	// GetByID retrieves a sync state by ID
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.SyncState, error)
+
+	// GetByConnectedAccount retrieves sync state by connected account ID
+	GetByConnectedAccount(ctx context.Context, connectedAccountID uuid.UUID) (*entity.SyncState, error)
+
+	// Update updates a sync state
+	Update(ctx context.Context, state *entity.SyncState) error
+
+	// ListByOrganization lists all sync states for an organization
+	ListByOrganization(ctx context.Context, orgID uuid.UUID) ([]entity.SyncState, error)
+
+	// ListDueForHourlySync lists accounts due for hourly sync
+	ListDueForHourlySync(ctx context.Context, platform entity.Platform) ([]entity.SyncState, error)
+
+	// ListDueForDailySync lists accounts due for daily sync
+	ListDueForDailySync(ctx context.Context, platform entity.Platform, hour int) ([]entity.SyncState, error)
+
+	// UpdateSyncStarted marks a sync as started
+	UpdateSyncStarted(ctx context.Context, id uuid.UUID, syncJobID uuid.UUID) error
+
+	// UpdateSyncCompleted marks a sync as completed
+	UpdateSyncCompleted(ctx context.Context, id uuid.UUID, syncType entity.SyncType) error
+
+	// UpdateSyncFailed marks a sync as failed
+	UpdateSyncFailed(ctx context.Context, id uuid.UUID, err string) error
+
+	// UpdateRateLimit updates rate limit information
+	UpdateRateLimit(ctx context.Context, id uuid.UUID, resetAt *time.Time) error
+
+	// GetDataFreshness retrieves data freshness info for all accounts in org
+	GetDataFreshness(ctx context.Context, orgID uuid.UUID) ([]entity.DataFreshnessInfo, error)
+}
+
+// SyncJobRepository defines the interface for sync job data persistence
+type SyncJobRepository interface {
+	// Create creates a new sync job
+	Create(ctx context.Context, job *entity.SyncJob) error
+
+	// GetByID retrieves a sync job by ID
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.SyncJob, error)
+
+	// Update updates a sync job
+	Update(ctx context.Context, job *entity.SyncJob) error
+
+	// ListPending lists pending jobs ready to run
+	ListPending(ctx context.Context, limit int) ([]entity.SyncJob, error)
+
+	// ListByConnectedAccount lists jobs for a connected account
+	ListByConnectedAccount(ctx context.Context, connectedAccountID uuid.UUID, limit int) ([]entity.SyncJob, error)
+
+	// ListRecent lists recent jobs (for dashboard)
+	ListRecent(ctx context.Context, orgID uuid.UUID, limit int) ([]entity.SyncJob, error)
+
+	// GetRunningJobs gets currently running jobs
+	GetRunningJobs(ctx context.Context) ([]entity.SyncJob, error)
+
+	// ClaimJob atomically claims a pending job for processing
+	ClaimJob(ctx context.Context, jobID uuid.UUID, workerID string) error
+
+	// UpdateProgress updates job progress
+	UpdateProgress(ctx context.Context, id uuid.UUID, percent int, message string) error
+
+	// MarkCompleted marks job as completed
+	MarkCompleted(ctx context.Context, id uuid.UUID, recordsProcessed, recordsFailed int) error
+
+	// MarkFailed marks job as failed
+	MarkFailed(ctx context.Context, id uuid.UUID, err, errorCode string) error
+
+	// ScheduleRetry schedules a retry for a failed job
+	ScheduleRetry(ctx context.Context, id uuid.UUID, retryAfter time.Time, lastError string) error
+
+	// DeleteOldJobs deletes jobs older than the specified days
+	DeleteOldJobs(ctx context.Context, olderThanDays int) error
+
+	// GetJobStats gets sync job statistics
+	GetJobStats(ctx context.Context, orgID uuid.UUID, dateRange entity.DateRange) (*SyncJobStats, error)
+}
+
+// SyncJobStats represents sync job statistics
+type SyncJobStats struct {
+	TotalJobs       int64 `json:"total_jobs"`
+	PendingJobs     int64 `json:"pending_jobs"`
+	RunningJobs     int64 `json:"running_jobs"`
+	CompletedJobs   int64 `json:"completed_jobs"`
+	FailedJobs      int64 `json:"failed_jobs"`
+	AverageDuration int   `json:"average_duration_seconds"`
+}
+
+// RetryQueueRepository defines the interface for retry queue persistence
+type RetryQueueRepository interface {
+	// Enqueue adds an entry to the retry queue
+	Enqueue(ctx context.Context, entry *entity.RetryQueueEntry) error
+
+	// Dequeue gets entries ready for retry
+	Dequeue(ctx context.Context, limit int) ([]entity.RetryQueueEntry, error)
+
+	// Remove removes an entry from the queue
+	Remove(ctx context.Context, id uuid.UUID) error
+
+	// GetByJobID gets retry entry by job ID
+	GetByJobID(ctx context.Context, jobID uuid.UUID) (*entity.RetryQueueEntry, error)
+
+	// UpdateRetryCount updates retry count
+	UpdateRetryCount(ctx context.Context, id uuid.UUID, count int, nextRetryAt time.Time, lastError string) error
+
+	// CleanupExpired removes entries that exceeded max retries
+	CleanupExpired(ctx context.Context) (int, error)
+}
+
+// WebhookEventRepository defines the interface for webhook event persistence
+type WebhookEventRepository interface {
+	// Create creates a new webhook event
+	Create(ctx context.Context, event *entity.WebhookEvent) error
+
+	// GetByID retrieves a webhook event by ID
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.WebhookEvent, error)
+
+	// Update updates a webhook event
+	Update(ctx context.Context, event *entity.WebhookEvent) error
+
+	// ListPendingEvents lists unprocessed webhook events
+	ListPendingEvents(ctx context.Context, limit int) ([]entity.WebhookEvent, error)
+
+	// MarkProcessed marks an event as processed
+	MarkProcessed(ctx context.Context, id uuid.UUID) error
+
+	// MarkFailed marks an event as failed
+	MarkFailed(ctx context.Context, id uuid.UUID, err string) error
+
+	// DeleteOldEvents deletes events older than the specified days
+	DeleteOldEvents(ctx context.Context, olderThanDays int) error
+}
+
+// ManualSyncRateLimitRepository defines the interface for manual sync rate limit tracking
+type ManualSyncRateLimitRepository interface {
+	// GetOrCreate gets or creates a rate limit entry for a user
+	GetOrCreate(ctx context.Context, userID, orgID uuid.UUID) (*entity.ManualSyncRateLimit, error)
+
+	// IncrementCount increments the sync count for current hour
+	IncrementCount(ctx context.Context, id uuid.UUID) error
+
+	// ResetForNewHour resets count for a new hour window
+	ResetForNewHour(ctx context.Context, id uuid.UUID) error
+
+	// CleanupOldRecords removes old rate limit records
+	CleanupOldRecords(ctx context.Context) (int, error)
+}
+
+// SyncErrorLogRepository defines the interface for sync error log persistence
+type SyncErrorLogRepository interface {
+	// Create creates a new error log entry
+	Create(ctx context.Context, log *entity.SyncErrorLog) error
+
+	// ListByJob lists errors for a job
+	ListByJob(ctx context.Context, jobID uuid.UUID) ([]entity.SyncErrorLog, error)
+
+	// ListByAccount lists errors for a connected account
+	ListByAccount(ctx context.Context, connectedAccountID uuid.UUID, limit int) ([]entity.SyncErrorLog, error)
+
+	// ListRecent lists recent errors across all accounts
+	ListRecent(ctx context.Context, orgID uuid.UUID, limit int) ([]entity.SyncErrorLog, error)
+
+	// DeleteOld deletes logs older than the specified days
+	DeleteOld(ctx context.Context, olderThanDays int) error
+
+	// GetErrorStats gets error statistics
+	GetErrorStats(ctx context.Context, orgID uuid.UUID, dateRange entity.DateRange) (map[string]int, error)
 }
 
 // UnitOfWork defines a transactional unit of work pattern

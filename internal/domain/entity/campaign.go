@@ -105,6 +105,7 @@ type CampaignSummary struct {
 // CampaignFilter represents filters for querying campaigns
 type CampaignFilter struct {
 	OrganizationID uuid.UUID           `json:"organization_id"`
+	CampaignIDs    []uuid.UUID         `json:"campaign_ids,omitempty"`
 	AdAccountIDs   []uuid.UUID         `json:"ad_account_ids,omitempty"`
 	Platforms      []Platform          `json:"platforms,omitempty"`
 	Statuses       []CampaignStatus    `json:"statuses,omitempty"`

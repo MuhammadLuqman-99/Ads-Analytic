@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -272,4 +273,190 @@ type TopPerformer struct {
 	Conversions int64           `json:"conversions"`
 	ROAS        float64         `json:"roas"`
 	CTR         float64         `json:"ctr"`
+}
+
+// ============================================================================
+// Analytics Request/Response Types
+// ============================================================================
+
+// AnalyticsRequest represents input parameters for analytics calculation
+type AnalyticsRequest struct {
+	OrganizationID uuid.UUID   `json:"organization_id" binding:"required"`
+	DateRange      DateRange   `json:"date_range" binding:"required"`
+	Platforms      []Platform  `json:"platforms,omitempty"`       // Filter by platforms (empty = all)
+	CampaignIDs    []uuid.UUID `json:"campaign_ids,omitempty"`    // Filter by specific campaigns (empty = all)
+	AdAccountIDs   []uuid.UUID `json:"ad_account_ids,omitempty"`  // Filter by ad accounts (empty = all)
+	TargetCurrency string      `json:"target_currency,omitempty"` // Currency for output (default: MYR)
+	IncludeDetails bool        `json:"include_details,omitempty"` // Include daily breakdown
+}
+
+// Validate validates the analytics request
+func (r *AnalyticsRequest) Validate() error {
+	if r.OrganizationID == uuid.Nil {
+		return fmt.Errorf("organization_id is required")
+	}
+	if r.DateRange.StartDate.IsZero() || r.DateRange.EndDate.IsZero() {
+		return fmt.Errorf("date_range with start_date and end_date is required")
+	}
+	if r.DateRange.StartDate.After(r.DateRange.EndDate) {
+		return fmt.Errorf("start_date must be before or equal to end_date")
+	}
+	// Validate platforms if provided
+	for _, p := range r.Platforms {
+		if !p.IsValid() {
+			return fmt.Errorf("invalid platform: %s", p)
+		}
+	}
+	// Default currency
+	if r.TargetCurrency == "" {
+		r.TargetCurrency = "MYR"
+	}
+	return nil
+}
+
+// AnalyticsResponse represents the complete analytics output
+type AnalyticsResponse struct {
+	// Request context
+	DateRange      DateRange `json:"date_range"`
+	TargetCurrency string    `json:"target_currency"`
+	GeneratedAt    time.Time `json:"generated_at"`
+
+	// Overall metrics (all platforms combined)
+	OverallMetrics *CalculatedMetrics `json:"overall_metrics"`
+
+	// Per-platform breakdown
+	PlatformMetrics map[Platform]*CalculatedMetrics `json:"platform_metrics"`
+
+	// Platform comparison rankings
+	Comparison *PlatformComparison `json:"comparison,omitempty"`
+
+	// Daily trend data (if include_details was true)
+	DailyTrend []DailyMetricsTrend `json:"daily_trend,omitempty"`
+
+	// Data quality indicators
+	DataQuality *DataQualityReport `json:"data_quality"`
+}
+
+// CalculatedMetrics represents all calculated advertising metrics
+type CalculatedMetrics struct {
+	// Platform info (nil for overall)
+	Platform *Platform `json:"platform,omitempty"`
+
+	// Raw totals
+	TotalSpend       decimal.Decimal `json:"total_spend"`
+	TotalRevenue     decimal.Decimal `json:"total_revenue"`
+	TotalImpressions int64           `json:"total_impressions"`
+	TotalClicks      int64           `json:"total_clicks"`
+	TotalConversions int64           `json:"total_conversions"`
+	TotalReach       int64           `json:"total_reach"`
+
+	// Engagement totals
+	TotalLikes    int64 `json:"total_likes"`
+	TotalComments int64 `json:"total_comments"`
+	TotalShares   int64 `json:"total_shares"`
+
+	// Calculated ratios (nil if denominator is zero - zero-division protection)
+	ROAS *float64         `json:"roas,omitempty"` // Revenue / Spend
+	CPA  *decimal.Decimal `json:"cpa,omitempty"`  // Spend / Conversions
+	CTR  *float64         `json:"ctr,omitempty"`  // Clicks / Impressions * 100
+	CPC  *decimal.Decimal `json:"cpc,omitempty"`  // Spend / Clicks
+	CPM  *decimal.Decimal `json:"cpm,omitempty"`  // Spend / Impressions * 1000
+
+	// Additional derived metrics
+	ConversionRate *float64 `json:"conversion_rate,omitempty"` // Conversions / Clicks * 100
+
+	// Campaign count
+	CampaignCount int `json:"campaign_count"`
+
+	// Currency used
+	Currency string `json:"currency"`
+
+	// Date range covered
+	FirstDate *time.Time `json:"first_date,omitempty"`
+	LastDate  *time.Time `json:"last_date,omitempty"`
+}
+
+// CalculateDerivedFields calculates ROAS, CPA, CTR, CPC, CPM with zero-division protection
+func (m *CalculatedMetrics) CalculateDerivedFields() {
+	// ROAS = Revenue / Spend
+	if m.TotalSpend.IsPositive() {
+		roas, _ := m.TotalRevenue.Div(m.TotalSpend).Float64()
+		m.ROAS = &roas
+	}
+
+	// CPA = Spend / Conversions
+	if m.TotalConversions > 0 {
+		cpa := m.TotalSpend.Div(decimal.NewFromInt(m.TotalConversions))
+		m.CPA = &cpa
+	}
+
+	// CTR = Clicks / Impressions * 100
+	if m.TotalImpressions > 0 {
+		ctr := float64(m.TotalClicks) / float64(m.TotalImpressions) * 100
+		m.CTR = &ctr
+	}
+
+	// CPC = Spend / Clicks
+	if m.TotalClicks > 0 {
+		cpc := m.TotalSpend.Div(decimal.NewFromInt(m.TotalClicks))
+		m.CPC = &cpc
+	}
+
+	// CPM = Spend / Impressions * 1000
+	if m.TotalImpressions > 0 {
+		cpm := m.TotalSpend.Div(decimal.NewFromInt(m.TotalImpressions)).Mul(decimal.NewFromInt(1000))
+		m.CPM = &cpm
+	}
+
+	// Conversion Rate = Conversions / Clicks * 100
+	if m.TotalClicks > 0 {
+		cvr := float64(m.TotalConversions) / float64(m.TotalClicks) * 100
+		m.ConversionRate = &cvr
+	}
+}
+
+// PlatformComparison shows which platform performs best across different metrics
+type PlatformComparison struct {
+	BestROAS      *PlatformRank `json:"best_roas,omitempty"`
+	LowestCPA     *PlatformRank `json:"lowest_cpa,omitempty"`
+	HighestCTR    *PlatformRank `json:"highest_ctr,omitempty"`
+	LowestCPC     *PlatformRank `json:"lowest_cpc,omitempty"`
+	MostSpend     *PlatformRank `json:"most_spend,omitempty"`
+	MostRevenue   *PlatformRank `json:"most_revenue,omitempty"`
+	MostClicks    *PlatformRank `json:"most_clicks,omitempty"`
+	BestConvRate  *PlatformRank `json:"best_conversion_rate,omitempty"`
+	PlatformCount int           `json:"platform_count"`
+}
+
+// PlatformRank indicates platform ranking for a specific metric
+type PlatformRank struct {
+	Platform     Platform `json:"platform"`
+	Value        float64  `json:"value"`
+	DisplayValue string   `json:"display_value"` // Formatted string for display
+}
+
+// DataQualityReport indicates missing or incomplete data
+type DataQualityReport struct {
+	HasCompleteData     bool       `json:"has_complete_data"`
+	TotalDaysRequested  int        `json:"total_days_requested"`
+	TotalDaysWithData   int        `json:"total_days_with_data"`
+	DataCompleteness    float64    `json:"data_completeness_percent"` // 0-100
+	MissingDates        []string   `json:"missing_dates,omitempty"`   // ISO date strings
+	PlatformsWithNoData []Platform `json:"platforms_with_no_data,omitempty"`
+	CampaignsWithNoData int        `json:"campaigns_with_no_data"`
+	Warnings            []string   `json:"warnings,omitempty"`
+	LastSyncTime        *time.Time `json:"last_sync_time,omitempty"`
+}
+
+// AddWarning adds a warning message
+func (d *DataQualityReport) AddWarning(warning string) {
+	d.Warnings = append(d.Warnings, warning)
+}
+
+// CalculateCompleteness calculates the data completeness percentage
+func (d *DataQualityReport) CalculateCompleteness() {
+	if d.TotalDaysRequested > 0 {
+		d.DataCompleteness = float64(d.TotalDaysWithData) / float64(d.TotalDaysRequested) * 100
+		d.HasCompleteData = d.TotalDaysWithData >= d.TotalDaysRequested
+	}
 }

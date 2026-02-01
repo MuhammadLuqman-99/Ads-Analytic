@@ -8,14 +8,16 @@ import (
 
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/repository"
+	"github.com/ads-aggregator/ads-aggregator/pkg/currency"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
 
 // Service handles analytics and metrics aggregation
 type Service struct {
-	metricsRepo  repository.MetricsRepository
-	campaignRepo repository.CampaignRepository
+	metricsRepo       repository.MetricsRepository
+	campaignRepo      repository.CampaignRepository
+	currencyConverter *currency.Converter
 }
 
 // NewService creates a new analytics service
@@ -24,8 +26,25 @@ func NewService(
 	campaignRepo repository.CampaignRepository,
 ) *Service {
 	return &Service{
-		metricsRepo:  metricsRepo,
-		campaignRepo: campaignRepo,
+		metricsRepo:       metricsRepo,
+		campaignRepo:      campaignRepo,
+		currencyConverter: currency.NewDefaultConverter(),
+	}
+}
+
+// NewServiceWithCurrency creates a new analytics service with custom currency converter
+func NewServiceWithCurrency(
+	metricsRepo repository.MetricsRepository,
+	campaignRepo repository.CampaignRepository,
+	converter *currency.Converter,
+) *Service {
+	if converter == nil {
+		converter = currency.NewDefaultConverter()
+	}
+	return &Service{
+		metricsRepo:       metricsRepo,
+		campaignRepo:      campaignRepo,
+		currencyConverter: converter,
 	}
 }
 
@@ -419,4 +438,465 @@ func (s *Service) GenerateReport(ctx context.Context, orgID uuid.UUID, dateRange
 // Helper to format numbers
 func formatNumber(n int64) string {
 	return fmt.Sprintf("%d", n)
+}
+
+// ============================================================================
+// CalculateAnalytics - Main Analytics Calculation Method
+// ============================================================================
+
+// CalculateAnalytics performs comprehensive metrics calculation based on the request
+// Returns ROAS, CPA, CTR per platform and combined with zero-division protection
+func (s *Service) CalculateAnalytics(ctx context.Context, req entity.AnalyticsRequest) (*entity.AnalyticsResponse, error) {
+	// 1. Validate request
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+
+	// 2. Build metrics filter from request
+	filter := entity.MetricsFilter{
+		OrganizationID: req.OrganizationID,
+		DateRange:      req.DateRange,
+		Platforms:      req.Platforms,
+		CampaignIDs:    req.CampaignIDs,
+	}
+
+	// 3. Get daily metrics based on filter
+	dailyMetrics, err := s.getDailyMetricsForFilter(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get daily metrics: %w", err)
+	}
+
+	// 4. Get campaign count
+	campaignFilter := entity.CampaignFilter{
+		OrganizationID: req.OrganizationID,
+		Platforms:      req.Platforms,
+	}
+	campaigns, _, _ := s.campaignRepo.List(ctx, campaignFilter)
+	campaignCount := len(campaigns)
+
+	// 5. Build response
+	response := &entity.AnalyticsResponse{
+		DateRange:       req.DateRange,
+		TargetCurrency:  req.TargetCurrency,
+		GeneratedAt:     time.Now(),
+		PlatformMetrics: make(map[entity.Platform]*entity.CalculatedMetrics),
+	}
+
+	// 6. Calculate overall metrics (all platforms combined)
+	response.OverallMetrics = s.calculateMetricsFromDaily(dailyMetrics, req.TargetCurrency, nil, campaignCount)
+
+	// 7. Calculate per-platform metrics
+	platformGroups := s.groupMetricsByPlatform(dailyMetrics)
+	platformCampaignCounts := s.getCampaignCountsByPlatform(campaigns)
+
+	for platform, metrics := range platformGroups {
+		count := platformCampaignCounts[platform]
+		platformCopy := platform // Create copy for pointer
+		calculated := s.calculateMetricsFromDaily(metrics, req.TargetCurrency, &platformCopy, count)
+		response.PlatformMetrics[platform] = calculated
+	}
+
+	// 8. Generate platform comparison
+	if len(response.PlatformMetrics) > 1 {
+		response.Comparison = s.generatePlatformComparison(response.PlatformMetrics)
+	}
+
+	// 9. Include daily trend if requested
+	if req.IncludeDetails {
+		filter.GroupBy = "day"
+		dailyTrend, err := s.metricsRepo.GetDailyTrend(ctx, filter)
+		if err == nil {
+			response.DailyTrend = dailyTrend
+		}
+	}
+
+	// 10. Build data quality report
+	response.DataQuality = s.buildDataQualityReport(dailyMetrics, req)
+
+	return response, nil
+}
+
+// getDailyMetricsForFilter retrieves daily metrics based on the filter
+// It handles campaign-specific queries vs organization-wide queries
+func (s *Service) getDailyMetricsForFilter(ctx context.Context, filter entity.MetricsFilter) ([]entity.CampaignMetricsDaily, error) {
+	var allMetrics []entity.CampaignMetricsDaily
+
+	// If specific campaigns requested, get metrics for each
+	if len(filter.CampaignIDs) > 0 {
+		for _, campaignID := range filter.CampaignIDs {
+			metrics, err := s.metricsRepo.GetCampaignMetrics(ctx, campaignID, filter.DateRange)
+			if err != nil {
+				continue // Skip campaigns that fail, include in data quality report
+			}
+			// Filter by platform if specified
+			for _, m := range metrics {
+				if len(filter.Platforms) == 0 || containsPlatform(filter.Platforms, m.Platform) {
+					allMetrics = append(allMetrics, m)
+				}
+			}
+		}
+	} else {
+		// Get all campaigns for organization
+		campaignFilter := entity.CampaignFilter{
+			OrganizationID: filter.OrganizationID,
+			Platforms:      filter.Platforms,
+		}
+		campaigns, _, err := s.campaignRepo.List(ctx, campaignFilter)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, campaign := range campaigns {
+			metrics, err := s.metricsRepo.GetCampaignMetrics(ctx, campaign.ID, filter.DateRange)
+			if err != nil {
+				continue // Skip campaigns that fail
+			}
+			allMetrics = append(allMetrics, metrics...)
+		}
+	}
+
+	return allMetrics, nil
+}
+
+// calculateMetricsFromDaily calculates aggregated metrics from daily data
+// with zero-division protection for all ratio metrics
+func (s *Service) calculateMetricsFromDaily(
+	dailyMetrics []entity.CampaignMetricsDaily,
+	targetCurrency string,
+	platform *entity.Platform,
+	campaignCount int,
+) *entity.CalculatedMetrics {
+	metrics := &entity.CalculatedMetrics{
+		Platform:      platform,
+		Currency:      targetCurrency,
+		CampaignCount: campaignCount,
+	}
+
+	if len(dailyMetrics) == 0 {
+		metrics.CalculateDerivedFields()
+		return metrics
+	}
+
+	// Track unique campaigns and date range
+	campaignsSeen := make(map[uuid.UUID]bool)
+	var firstDate, lastDate time.Time
+
+	// Aggregate all daily metrics
+	for _, m := range dailyMetrics {
+		// Currency conversion if needed
+		spend := s.convertCurrency(m.Spend, m.Currency, targetCurrency)
+		revenue := s.convertCurrency(m.ConversionValue, m.Currency, targetCurrency)
+
+		metrics.TotalSpend = metrics.TotalSpend.Add(spend)
+		metrics.TotalRevenue = metrics.TotalRevenue.Add(revenue)
+		metrics.TotalImpressions += m.Impressions
+		metrics.TotalClicks += m.Clicks
+		metrics.TotalConversions += m.Conversions
+		metrics.TotalReach += m.Reach
+		metrics.TotalLikes += m.Likes
+		metrics.TotalComments += m.Comments
+		metrics.TotalShares += m.Shares
+
+		// Track campaigns
+		campaignsSeen[m.CampaignID] = true
+
+		// Track date range
+		if firstDate.IsZero() || m.MetricDate.Before(firstDate) {
+			firstDate = m.MetricDate
+		}
+		if lastDate.IsZero() || m.MetricDate.After(lastDate) {
+			lastDate = m.MetricDate
+		}
+	}
+
+	// Set date range
+	if !firstDate.IsZero() {
+		metrics.FirstDate = &firstDate
+	}
+	if !lastDate.IsZero() {
+		metrics.LastDate = &lastDate
+	}
+
+	// Update campaign count from actual data if not provided
+	if campaignCount == 0 {
+		metrics.CampaignCount = len(campaignsSeen)
+	}
+
+	// Calculate derived fields with zero-division protection
+	metrics.CalculateDerivedFields()
+
+	return metrics
+}
+
+// groupMetricsByPlatform groups metrics by platform
+func (s *Service) groupMetricsByPlatform(metrics []entity.CampaignMetricsDaily) map[entity.Platform][]entity.CampaignMetricsDaily {
+	grouped := make(map[entity.Platform][]entity.CampaignMetricsDaily)
+	for _, m := range metrics {
+		grouped[m.Platform] = append(grouped[m.Platform], m)
+	}
+	return grouped
+}
+
+// getCampaignCountsByPlatform counts campaigns per platform
+func (s *Service) getCampaignCountsByPlatform(campaigns []entity.Campaign) map[entity.Platform]int {
+	counts := make(map[entity.Platform]int)
+	for _, c := range campaigns {
+		counts[c.Platform]++
+	}
+	return counts
+}
+
+// convertCurrency converts an amount to target currency using the currency converter
+func (s *Service) convertCurrency(amount decimal.Decimal, from, to string) decimal.Decimal {
+	if from == to || from == "" || to == "" {
+		return amount
+	}
+
+	if amount.IsZero() {
+		return amount
+	}
+
+	// Use the currency converter
+	converted, err := s.currencyConverter.Convert(amount, from, to)
+	if err != nil {
+		// On error, return original amount (with warning in production)
+		return amount
+	}
+	return converted
+}
+
+// GetSupportedCurrencies returns list of supported currencies for conversion
+func (s *Service) GetSupportedCurrencies() []string {
+	return s.currencyConverter.GetSupportedCurrencies()
+}
+
+// IsSupportedCurrency checks if a currency is supported
+func (s *Service) IsSupportedCurrency(code string) bool {
+	return s.currencyConverter.IsSupportedCurrency(code)
+}
+
+// generatePlatformComparison generates comparison rankings between platforms
+func (s *Service) generatePlatformComparison(platformMetrics map[entity.Platform]*entity.CalculatedMetrics) *entity.PlatformComparison {
+	comparison := &entity.PlatformComparison{
+		PlatformCount: len(platformMetrics),
+	}
+
+	// Convert to slice for sorting
+	type platformEntry struct {
+		platform entity.Platform
+		metrics  *entity.CalculatedMetrics
+	}
+	entries := make([]platformEntry, 0, len(platformMetrics))
+	for p, m := range platformMetrics {
+		entries = append(entries, platformEntry{platform: p, metrics: m})
+	}
+
+	// Best ROAS (highest)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].metrics.ROAS == nil {
+			return false
+		}
+		if entries[j].metrics.ROAS == nil {
+			return true
+		}
+		return *entries[i].metrics.ROAS > *entries[j].metrics.ROAS
+	})
+	if len(entries) > 0 && entries[0].metrics.ROAS != nil {
+		comparison.BestROAS = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        *entries[0].metrics.ROAS,
+			DisplayValue: fmt.Sprintf("%.2fx", *entries[0].metrics.ROAS),
+		}
+	}
+
+	// Highest CTR
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].metrics.CTR == nil {
+			return false
+		}
+		if entries[j].metrics.CTR == nil {
+			return true
+		}
+		return *entries[i].metrics.CTR > *entries[j].metrics.CTR
+	})
+	if len(entries) > 0 && entries[0].metrics.CTR != nil {
+		comparison.HighestCTR = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        *entries[0].metrics.CTR,
+			DisplayValue: fmt.Sprintf("%.2f%%", *entries[0].metrics.CTR),
+		}
+	}
+
+	// Lowest CPA (best)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].metrics.CPA == nil {
+			return false
+		}
+		if entries[j].metrics.CPA == nil {
+			return true
+		}
+		return entries[i].metrics.CPA.LessThan(*entries[j].metrics.CPA)
+	})
+	if len(entries) > 0 && entries[0].metrics.CPA != nil {
+		cpaFloat, _ := entries[0].metrics.CPA.Float64()
+		comparison.LowestCPA = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        cpaFloat,
+			DisplayValue: fmt.Sprintf("%s %s", entries[0].metrics.Currency, entries[0].metrics.CPA.StringFixed(2)),
+		}
+	}
+
+	// Lowest CPC (best)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].metrics.CPC == nil {
+			return false
+		}
+		if entries[j].metrics.CPC == nil {
+			return true
+		}
+		return entries[i].metrics.CPC.LessThan(*entries[j].metrics.CPC)
+	})
+	if len(entries) > 0 && entries[0].metrics.CPC != nil {
+		cpcFloat, _ := entries[0].metrics.CPC.Float64()
+		comparison.LowestCPC = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        cpcFloat,
+			DisplayValue: fmt.Sprintf("%s %s", entries[0].metrics.Currency, entries[0].metrics.CPC.StringFixed(2)),
+		}
+	}
+
+	// Most Spend
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].metrics.TotalSpend.GreaterThan(entries[j].metrics.TotalSpend)
+	})
+	if len(entries) > 0 {
+		spendFloat, _ := entries[0].metrics.TotalSpend.Float64()
+		comparison.MostSpend = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        spendFloat,
+			DisplayValue: fmt.Sprintf("%s %s", entries[0].metrics.Currency, entries[0].metrics.TotalSpend.StringFixed(2)),
+		}
+	}
+
+	// Most Revenue
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].metrics.TotalRevenue.GreaterThan(entries[j].metrics.TotalRevenue)
+	})
+	if len(entries) > 0 {
+		revFloat, _ := entries[0].metrics.TotalRevenue.Float64()
+		comparison.MostRevenue = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        revFloat,
+			DisplayValue: fmt.Sprintf("%s %s", entries[0].metrics.Currency, entries[0].metrics.TotalRevenue.StringFixed(2)),
+		}
+	}
+
+	// Most Clicks
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].metrics.TotalClicks > entries[j].metrics.TotalClicks
+	})
+	if len(entries) > 0 {
+		comparison.MostClicks = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        float64(entries[0].metrics.TotalClicks),
+			DisplayValue: formatNumber(entries[0].metrics.TotalClicks),
+		}
+	}
+
+	// Best Conversion Rate
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].metrics.ConversionRate == nil {
+			return false
+		}
+		if entries[j].metrics.ConversionRate == nil {
+			return true
+		}
+		return *entries[i].metrics.ConversionRate > *entries[j].metrics.ConversionRate
+	})
+	if len(entries) > 0 && entries[0].metrics.ConversionRate != nil {
+		comparison.BestConvRate = &entity.PlatformRank{
+			Platform:     entries[0].platform,
+			Value:        *entries[0].metrics.ConversionRate,
+			DisplayValue: fmt.Sprintf("%.2f%%", *entries[0].metrics.ConversionRate),
+		}
+	}
+
+	return comparison
+}
+
+// buildDataQualityReport creates a data quality report
+func (s *Service) buildDataQualityReport(metrics []entity.CampaignMetricsDaily, req entity.AnalyticsRequest) *entity.DataQualityReport {
+	report := &entity.DataQualityReport{
+		TotalDaysRequested: int(req.DateRange.EndDate.Sub(req.DateRange.StartDate).Hours()/24) + 1,
+	}
+
+	if len(metrics) == 0 {
+		report.AddWarning("No metrics data found for the specified date range")
+		report.CalculateCompleteness()
+		return report
+	}
+
+	// Track dates with data
+	datesWithData := make(map[string]bool)
+	platformsWithData := make(map[entity.Platform]bool)
+	campaignsWithData := make(map[uuid.UUID]bool)
+	var latestSync time.Time
+
+	for _, m := range metrics {
+		dateKey := m.MetricDate.Format("2006-01-02")
+		datesWithData[dateKey] = true
+		platformsWithData[m.Platform] = true
+		campaignsWithData[m.CampaignID] = true
+
+		if m.LastSyncedAt != nil && m.LastSyncedAt.After(latestSync) {
+			latestSync = *m.LastSyncedAt
+		}
+	}
+
+	report.TotalDaysWithData = len(datesWithData)
+
+	// Check for missing dates
+	for d := req.DateRange.StartDate; !d.After(req.DateRange.EndDate); d = d.AddDate(0, 0, 1) {
+		dateKey := d.Format("2006-01-02")
+		if !datesWithData[dateKey] {
+			report.MissingDates = append(report.MissingDates, dateKey)
+		}
+	}
+
+	// Check for platforms with no data (if specific platforms requested)
+	if len(req.Platforms) > 0 {
+		for _, p := range req.Platforms {
+			if !platformsWithData[p] {
+				report.PlatformsWithNoData = append(report.PlatformsWithNoData, p)
+			}
+		}
+	}
+
+	// Set last sync time
+	if !latestSync.IsZero() {
+		report.LastSyncTime = &latestSync
+	}
+
+	// Generate warnings
+	if len(report.MissingDates) > 0 {
+		report.AddWarning(fmt.Sprintf("%d days have missing data", len(report.MissingDates)))
+	}
+	if len(report.PlatformsWithNoData) > 0 {
+		report.AddWarning(fmt.Sprintf("No data for platforms: %v", report.PlatformsWithNoData))
+	}
+
+	// Calculate completeness
+	report.CalculateCompleteness()
+
+	return report
+}
+
+// containsPlatform checks if a platform is in the list
+func containsPlatform(platforms []entity.Platform, p entity.Platform) bool {
+	for _, platform := range platforms {
+		if platform == p {
+			return true
+		}
+	}
+	return false
 }

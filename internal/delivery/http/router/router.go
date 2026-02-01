@@ -189,6 +189,7 @@ func (r *Router) setupProtectedRoutes(rg *gin.RouterGroup) {
 		analytics.GET("/platform-comparison", r.analyticsHandler.GetPlatformComparison)
 		analytics.GET("/trends", r.analyticsHandler.GetTrends)
 		analytics.GET("/top-performers", r.analyticsHandler.GetTopPerformers)
+		analytics.POST("/calculate", r.analyticsHandler.CalculateMetrics) // New analytics calculation endpoint
 		analytics.POST("/reports/generate", r.analyticsHandler.GenerateReport)
 		analytics.GET("/reports/:reportId", r.analyticsHandler.GetReport)
 	}
