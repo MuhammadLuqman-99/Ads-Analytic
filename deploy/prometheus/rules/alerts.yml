@@ -1,0 +1,232 @@
+groups:
+  # ==========================================================================
+  # API Alerts
+  # ==========================================================================
+  - name: api
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(ads_analytics_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(ads_analytics_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(ads_analytics_http_request_duration_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile latency is {{ $value | humanizeDuration }}"
+
+      - alert: APIDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API service is down"
+          description: "API service has been down for more than 1 minute"
+
+  # ==========================================================================
+  # Sync Job Alerts
+  # ==========================================================================
+  - name: sync
+    rules:
+      - alert: SyncJobsFailing
+        expr: |
+          sum(rate(ads_analytics_sync_jobs_total{status="failed"}[1h]))
+          / sum(rate(ads_analytics_sync_jobs_total[1h])) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "High sync job failure rate"
+          description: "Sync job failure rate is {{ $value | humanizePercentage }}"
+
+      - alert: SyncJobsStuck
+        expr: ads_analytics_sync_jobs_in_flight > 10
+        for: 30m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Sync jobs appear to be stuck"
+          description: "{{ $value }} sync jobs have been running for over 30 minutes"
+
+      - alert: NoSyncJobsRunning
+        expr: |
+          sum(increase(ads_analytics_sync_jobs_total[2h])) == 0
+        for: 2h
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "No sync jobs running"
+          description: "No sync jobs have been executed in the last 2 hours"
+
+  # ==========================================================================
+  # Platform API Alerts
+  # ==========================================================================
+  - name: platform
+    rules:
+      - alert: PlatformAPIErrors
+        expr: |
+          sum(rate(ads_analytics_platform_api_errors_total[5m])) by (platform) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: platform
+        annotations:
+          summary: "High platform API error rate for {{ $labels.platform }}"
+          description: "{{ $labels.platform }} API error rate is {{ $value }}/s"
+
+      - alert: RateLimitHits
+        expr: |
+          sum(rate(ads_analytics_platform_rate_limit_hits_total[5m])) by (platform) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: platform
+        annotations:
+          summary: "Rate limit hits for {{ $labels.platform }}"
+          description: "{{ $labels.platform }} is hitting rate limits"
+
+  # ==========================================================================
+  # Database Alerts
+  # ==========================================================================
+  - name: database
+    rules:
+      - alert: DatabaseConnectionsHigh
+        expr: ads_analytics_db_connections_open > 40
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High number of database connections"
+          description: "{{ $value }} database connections open (threshold: 40)"
+
+      - alert: DatabaseSlowQueries
+        expr: |
+          histogram_quantile(0.95, sum(rate(ads_analytics_db_query_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile query duration is {{ $value | humanizeDuration }}"
+
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL has been down for more than 1 minute"
+
+  # ==========================================================================
+  # Redis Alerts
+  # ==========================================================================
+  - name: redis
+    rules:
+      - alert: RedisErrors
+        expr: |
+          sum(rate(ads_analytics_redis_errors_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis errors detected"
+          description: "Redis error rate is {{ $value }}/s"
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis has been down for more than 1 minute"
+
+  # ==========================================================================
+  # Business Alerts
+  # ==========================================================================
+  - name: business
+    rules:
+      - alert: LowActiveUsers
+        expr: ads_analytics_active_users < 10
+        for: 1h
+        labels:
+          severity: info
+          service: business
+        annotations:
+          summary: "Low active users"
+          description: "Only {{ $value }} active users in the last 24 hours"
+
+      - alert: PaymentFailures
+        expr: |
+          sum(rate(ads_analytics_payments_total{status="failed"}[1h]))
+          / sum(rate(ads_analytics_payments_total[1h])) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          service: billing
+        annotations:
+          summary: "High payment failure rate"
+          description: "Payment failure rate is {{ $value | humanizePercentage }}"
+
+  # ==========================================================================
+  # System Alerts
+  # ==========================================================================
+  - name: system
+    rules:
+      - alert: HighMemoryUsage
+        expr: |
+          (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+          / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}%"
+
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{fstype!="tmpfs"}
+          / node_filesystem_size_bytes{fstype!="tmpfs"}) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is less than 10% available"

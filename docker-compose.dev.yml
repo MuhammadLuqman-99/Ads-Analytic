@@ -1,0 +1,73 @@
+# =============================================================================
+# Ads Analytics Platform - Docker Compose Development Override
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ===========================================================================
+  # API - Development Mode
+  # ===========================================================================
+  api:
+    build:
+      target: api
+    environment:
+      - APP_ENV=development
+      - APP_DEBUG=true
+      - LOG_LEVEL=debug
+    volumes:
+      - .:/app:delegated
+    ports:
+      - "8080:8080"
+      - "2345:2345" # Delve debugger
+
+  # ===========================================================================
+  # Worker - Development Mode
+  # ===========================================================================
+  worker:
+    build:
+      target: worker
+    environment:
+      - APP_ENV=development
+      - APP_DEBUG=true
+      - LOG_LEVEL=debug
+    volumes:
+      - .:/app:delegated
+
+  # ===========================================================================
+  # Frontend - Development Mode
+  # ===========================================================================
+  frontend:
+    build:
+      target: deps
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./frontend:/app:delegated
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+
+  # ===========================================================================
+  # PostgreSQL - Development
+  # ===========================================================================
+  postgres:
+    ports:
+      - "5432:5432"
+
+  # ===========================================================================
+  # Redis - Development
+  # ===========================================================================
+  redis:
+    ports:
+      - "6379:6379"
+
+  # ===========================================================================
+  # Nginx - Disabled in development
+  # ===========================================================================
+  nginx:
+    profiles:
+      - production

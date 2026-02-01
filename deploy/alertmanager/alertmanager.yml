@@ -1,0 +1,82 @@
+# =============================================================================
+# Alertmanager Configuration
+# =============================================================================
+
+global:
+  resolve_timeout: 5m
+  # SMTP settings for email alerts
+  # smtp_smarthost: 'smtp.gmail.com:587'
+  # smtp_from: 'alertmanager@yourdomain.com'
+  # smtp_auth_username: 'your-email@gmail.com'
+  # smtp_auth_password: 'your-app-password'
+
+# Route tree
+route:
+  group_by: ['alertname', 'severity', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default-receiver'
+
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Warning alerts
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      group_wait: 1m
+      repeat_interval: 4h
+
+    # Billing alerts - separate channel
+    - match:
+        service: billing
+      receiver: 'billing-receiver'
+      group_wait: 30s
+
+# Inhibition rules
+inhibit_rules:
+  # Inhibit warning alerts when critical alerts are firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'service']
+
+# Receivers
+receivers:
+  - name: 'default-receiver'
+    # Webhook for generic alerts (e.g., to Slack, Discord, etc.)
+    # webhook_configs:
+    #   - url: 'http://your-webhook-url'
+    #     send_resolved: true
+
+  - name: 'critical-receiver'
+    # Webhook for critical alerts - PagerDuty, OpsGenie, etc.
+    # webhook_configs:
+    #   - url: 'http://your-pagerduty-webhook'
+    #     send_resolved: true
+    # Email for critical alerts
+    # email_configs:
+    #   - to: 'oncall@yourdomain.com'
+    #     send_resolved: true
+
+  - name: 'warning-receiver'
+    # Slack/Discord webhook for warnings
+    # webhook_configs:
+    #   - url: 'http://your-slack-webhook'
+    #     send_resolved: true
+
+  - name: 'billing-receiver'
+    # Separate channel for billing alerts
+    # webhook_configs:
+    #   - url: 'http://your-billing-alerts-webhook'
+    #     send_resolved: true
+
+# Templates
+templates: []

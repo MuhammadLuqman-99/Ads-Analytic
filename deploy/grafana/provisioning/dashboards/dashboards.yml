@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: "Ads Analytics Dashboards"
+    orgId: 1
+    folder: "Ads Analytics"
+    folderUid: "ads-analytics"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

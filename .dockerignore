@@ -1,0 +1,54 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Go
+bin/
+tmp/
+
+# Test files
+*_test.go
+*.test
+
+# Documentation
+*.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Environment files (we use build args for secrets)
+.env
+.env.*
+!.env.example
+
+# Frontend (separate Dockerfile)
+frontend/
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Coverage
+coverage.out
+coverage.html
+
+# Local development
+.claude/

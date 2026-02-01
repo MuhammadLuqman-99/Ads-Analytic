@@ -462,6 +462,165 @@ type SyncErrorLogRepository interface {
 	GetErrorStats(ctx context.Context, orgID uuid.UUID, dateRange entity.DateRange) (map[string]int, error)
 }
 
+// SubscriptionRepository defines the interface for subscription data persistence
+type SubscriptionRepository interface {
+	// Create creates a new subscription
+	Create(ctx context.Context, sub *entity.Subscription) error
+
+	// GetByID retrieves a subscription by ID
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.Subscription, error)
+
+	// GetByOrganization retrieves subscription by organization ID
+	GetByOrganization(ctx context.Context, orgID uuid.UUID) (*entity.Subscription, error)
+
+	// GetByStripeCustomerID retrieves by Stripe customer ID
+	GetByStripeCustomerID(ctx context.Context, customerID string) (*entity.Subscription, error)
+
+	// GetByStripeSubscriptionID retrieves by Stripe subscription ID
+	GetByStripeSubscriptionID(ctx context.Context, subscriptionID string) (*entity.Subscription, error)
+
+	// Update updates a subscription
+	Update(ctx context.Context, sub *entity.Subscription) error
+
+	// UpdateStatus updates subscription status
+	UpdateStatus(ctx context.Context, id uuid.UUID, status entity.SubscriptionStatus) error
+
+	// UpdatePlan updates the plan tier
+	UpdatePlan(ctx context.Context, id uuid.UUID, tier entity.PlanTier, cycle entity.BillingCycle) error
+
+	// RecordPayment records a successful payment
+	RecordPayment(ctx context.Context, id uuid.UUID, amount float64, paidAt time.Time) error
+
+	// IncrementPaymentFails increments payment failure count
+	IncrementPaymentFails(ctx context.Context, id uuid.UUID) error
+
+	// ResetPaymentFails resets payment failure count
+	ResetPaymentFails(ctx context.Context, id uuid.UUID) error
+
+	// ListExpiring lists subscriptions expiring within given days
+	ListExpiring(ctx context.Context, withinDays int) ([]entity.Subscription, error)
+
+	// ListPastDue lists subscriptions with past due payments
+	ListPastDue(ctx context.Context) ([]entity.Subscription, error)
+}
+
+// PaymentHistoryRepository defines the interface for payment history persistence
+type PaymentHistoryRepository interface {
+	// Create creates a new payment record
+	Create(ctx context.Context, payment *entity.PaymentHistory) error
+
+	// GetByID retrieves a payment by ID
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.PaymentHistory, error)
+
+	// GetByStripePaymentIntent retrieves by Stripe payment intent ID
+	GetByStripePaymentIntent(ctx context.Context, intentID string) (*entity.PaymentHistory, error)
+
+	// ListByOrganization lists payments for an organization
+	ListByOrganization(ctx context.Context, orgID uuid.UUID, limit int) ([]entity.PaymentHistory, error)
+
+	// ListBySubscription lists payments for a subscription
+	ListBySubscription(ctx context.Context, subID uuid.UUID) ([]entity.PaymentHistory, error)
+
+	// UpdateStatus updates payment status
+	UpdateStatus(ctx context.Context, id uuid.UUID, status entity.PaymentStatus) error
+
+	// GetTotalRevenue gets total revenue for a period
+	GetTotalRevenue(ctx context.Context, startDate, endDate time.Time) (float64, error)
+}
+
+// UsageRepository defines the interface for usage tracking persistence
+type UsageRepository interface {
+	// GetOrCreateDaily gets or creates daily usage record
+	GetOrCreateDaily(ctx context.Context, orgID uuid.UUID, date time.Time) (*entity.OrganizationUsage, error)
+
+	// GetByDate retrieves usage for a specific date
+	GetByDate(ctx context.Context, orgID uuid.UUID, date time.Time) (*entity.OrganizationUsage, error)
+
+	// IncrementAPICallCount increments API call counter
+	IncrementAPICallCount(ctx context.Context, orgID uuid.UUID) error
+
+	// IncrementSyncCount increments sync counter
+	IncrementSyncCount(ctx context.Context, orgID uuid.UUID, recordsSynced int64) error
+
+	// IncrementReportCount increments report counter
+	IncrementReportCount(ctx context.Context, orgID uuid.UUID) error
+
+	// UpdateStorageUsage updates storage usage in bytes
+	UpdateStorageUsage(ctx context.Context, orgID uuid.UUID, bytes int64) error
+
+	// UpdateAccountsCount updates connected accounts count
+	UpdateAccountsCount(ctx context.Context, orgID uuid.UUID, count int) error
+
+	// UpdateUsersCount updates active users count
+	UpdateUsersCount(ctx context.Context, orgID uuid.UUID, count int) error
+
+	// UpdateLimits updates usage limits based on plan
+	UpdateLimits(ctx context.Context, orgID uuid.UUID, limits entity.PlanLimits) error
+
+	// GetSummary gets usage summary for a period
+	GetSummary(ctx context.Context, orgID uuid.UUID, startDate, endDate time.Time) (*entity.UsageSummary, error)
+
+	// GetDailyUsage gets daily usage for a date range
+	GetDailyUsage(ctx context.Context, orgID uuid.UUID, startDate, endDate time.Time) ([]entity.OrganizationUsage, error)
+
+	// CheckAPILimit checks if API call limit is exceeded
+	CheckAPILimit(ctx context.Context, orgID uuid.UUID) (bool, int64, int64, error) // exceeded, current, limit
+}
+
+// UsageEventRepository defines the interface for usage event logging
+type UsageEventRepository interface {
+	// Create creates a new usage event
+	Create(ctx context.Context, event *entity.UsageEvent) error
+
+	// ListByOrganization lists events for an organization
+	ListByOrganization(ctx context.Context, orgID uuid.UUID, eventType entity.UsageType, limit int) ([]entity.UsageEvent, error)
+
+	// GetEventCounts gets event counts by type for a period
+	GetEventCounts(ctx context.Context, orgID uuid.UUID, startDate, endDate time.Time) (map[entity.UsageType]int64, error)
+
+	// DeleteOld deletes events older than specified days
+	DeleteOld(ctx context.Context, olderThanDays int) error
+}
+
+// QuotaAlertRepository defines the interface for quota alerts
+type QuotaAlertRepository interface {
+	// Create creates a new quota alert
+	Create(ctx context.Context, alert *entity.QuotaAlert) error
+
+	// GetUnacknowledged gets unacknowledged alerts for an organization
+	GetUnacknowledged(ctx context.Context, orgID uuid.UUID) ([]entity.QuotaAlert, error)
+
+	// Acknowledge acknowledges an alert
+	Acknowledge(ctx context.Context, alertID uuid.UUID, userID uuid.UUID) error
+
+	// GetRecent gets recent alerts
+	GetRecent(ctx context.Context, orgID uuid.UUID, limit int) ([]entity.QuotaAlert, error)
+}
+
+// CouponRepository defines the interface for coupon management
+type CouponRepository interface {
+	// Create creates a new coupon
+	Create(ctx context.Context, coupon *entity.Coupon) error
+
+	// GetByCode retrieves a coupon by code
+	GetByCode(ctx context.Context, code string) (*entity.Coupon, error)
+
+	// GetByStripeCouponID retrieves by Stripe coupon ID
+	GetByStripeCouponID(ctx context.Context, stripeCouponID string) (*entity.Coupon, error)
+
+	// IncrementRedemptions increments redemption count
+	IncrementRedemptions(ctx context.Context, id uuid.UUID) error
+
+	// Update updates a coupon
+	Update(ctx context.Context, coupon *entity.Coupon) error
+
+	// Deactivate deactivates a coupon
+	Deactivate(ctx context.Context, id uuid.UUID) error
+
+	// ListActive lists active coupons
+	ListActive(ctx context.Context) ([]entity.Coupon, error)
+}
+
 // UnitOfWork defines a transactional unit of work pattern
 type UnitOfWork interface {
 	// Begin starts a new transaction
