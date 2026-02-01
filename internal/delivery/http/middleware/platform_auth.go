@@ -98,9 +98,8 @@ func (m *PlatformAuthMiddleware) RequireActiveToken() gin.HandlerFunc {
 		}
 
 		if account.Status != entity.AccountStatusActive {
-			m.abortWithError(c, errors.NewAppError(
+			m.abortWithError(c, errors.New(
 				errors.ErrCodeOAuthFailed,
-				"ACCOUNT_INACTIVE",
 				"Connected account is not active. Current status: "+string(account.Status),
 				401,
 			))

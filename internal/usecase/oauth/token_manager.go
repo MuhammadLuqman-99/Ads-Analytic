@@ -101,23 +101,20 @@ func (m *TokenManager) ValidateToken(ctx context.Context, accountID uuid.UUID) (
 	// Check account status
 	switch account.Status {
 	case entity.AccountStatusRevoked:
-		return nil, errors.NewAppError(
+		return nil, errors.New(
 			errors.ErrCodeOAuthFailed,
-			"TOKEN_REVOKED",
 			"Access has been revoked. Please reconnect your account.",
 			401,
 		)
 	case entity.AccountStatusExpired:
-		return nil, errors.NewAppError(
+		return nil, errors.New(
 			errors.ErrCodeOAuthFailed,
-			"TOKEN_EXPIRED",
 			"Token has expired. Please reconnect your account.",
 			401,
 		)
 	case entity.AccountStatusInactive:
-		return nil, errors.NewAppError(
+		return nil, errors.New(
 			errors.ErrCodeOAuthFailed,
-			"ACCOUNT_INACTIVE",
 			"Account is inactive.",
 			401,
 		)
@@ -131,9 +128,8 @@ func (m *TokenManager) ValidateToken(ctx context.Context, accountID uuid.UUID) (
 			account.Status = entity.AccountStatusExpired
 			_ = m.connectedAccRepo.Update(ctx, account)
 
-			return nil, errors.NewAppError(
+			return nil, errors.New(
 				errors.ErrCodeOAuthFailed,
-				"TOKEN_EXPIRED",
 				"Token has expired and could not be refreshed. Please reconnect your account.",
 				401,
 			)
