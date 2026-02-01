@@ -23,27 +23,37 @@ export interface DailyMetric {
     impressions: number
     clicks: number
     conversions: number
+    // Platform breakdown
+    metaSpend?: number
+    tiktokSpend?: number
+    shopeeSpend?: number
 }
 
 export interface PlatformMetrics {
     platform: Platform
     spend: number
+    revenue: number
     impressions: number
     clicks: number
     conversions: number
     roas: number
+    spendChange: number
+    roasChange: number
 }
 
 export interface DashboardMetrics {
     totalSpend: number
+    totalRevenue: number
     totalImpressions: number
     totalClicks: number
     totalConversions: number
     averageRoas: number
     spendChange: number
+    revenueChange: number
     impressionsChange: number
     clicksChange: number
     conversionsChange: number
+    roasChange: number
 }
 
 export interface ConnectedAccount {
@@ -201,59 +211,71 @@ export const mockCampaigns: Campaign[] = [
 ]
 
 export const mockDailyMetrics: DailyMetric[] = [
-    { date: "2024-01-25", spend: 2450, impressions: 125000, clicks: 4200, conversions: 165 },
-    { date: "2024-01-26", spend: 2680, impressions: 132000, clicks: 4580, conversions: 182 },
-    { date: "2024-01-27", spend: 3120, impressions: 156000, clicks: 5340, conversions: 215 },
-    { date: "2024-01-28", spend: 2890, impressions: 142000, clicks: 4890, conversions: 195 },
-    { date: "2024-01-29", spend: 3450, impressions: 178000, clicks: 6120, conversions: 248 },
-    { date: "2024-01-30", spend: 3680, impressions: 185000, clicks: 6450, conversions: 262 },
-    { date: "2024-01-31", spend: 4120, impressions: 205000, clicks: 7230, conversions: 295 },
-    { date: "2024-02-01", spend: 3950, impressions: 198000, clicks: 6890, conversions: 278 },
-    { date: "2024-02-02", spend: 4280, impressions: 215000, clicks: 7520, conversions: 305 },
-    { date: "2024-02-03", spend: 4560, impressions: 228000, clicks: 7980, conversions: 325 },
-    { date: "2024-02-04", spend: 4120, impressions: 206000, clicks: 7150, conversions: 290 },
-    { date: "2024-02-05", spend: 3890, impressions: 194000, clicks: 6780, conversions: 275 },
-    { date: "2024-02-06", spend: 4350, impressions: 218000, clicks: 7620, conversions: 310 },
-    { date: "2024-02-07", spend: 4680, impressions: 234000, clicks: 8190, conversions: 335 },
+    { date: "2024-01-25", spend: 2450, impressions: 125000, clicks: 4200, conversions: 165, metaSpend: 1200, tiktokSpend: 850, shopeeSpend: 400 },
+    { date: "2024-01-26", spend: 2680, impressions: 132000, clicks: 4580, conversions: 182, metaSpend: 1350, tiktokSpend: 920, shopeeSpend: 410 },
+    { date: "2024-01-27", spend: 3120, impressions: 156000, clicks: 5340, conversions: 215, metaSpend: 1580, tiktokSpend: 1050, shopeeSpend: 490 },
+    { date: "2024-01-28", spend: 2890, impressions: 142000, clicks: 4890, conversions: 195, metaSpend: 1420, tiktokSpend: 980, shopeeSpend: 490 },
+    { date: "2024-01-29", spend: 3450, impressions: 178000, clicks: 6120, conversions: 248, metaSpend: 1720, tiktokSpend: 1180, shopeeSpend: 550 },
+    { date: "2024-01-30", spend: 3680, impressions: 185000, clicks: 6450, conversions: 262, metaSpend: 1850, tiktokSpend: 1250, shopeeSpend: 580 },
+    { date: "2024-01-31", spend: 4120, impressions: 205000, clicks: 7230, conversions: 295, metaSpend: 2050, tiktokSpend: 1420, shopeeSpend: 650 },
+    { date: "2024-02-01", spend: 3950, impressions: 198000, clicks: 6890, conversions: 278, metaSpend: 1980, tiktokSpend: 1350, shopeeSpend: 620 },
+    { date: "2024-02-02", spend: 4280, impressions: 215000, clicks: 7520, conversions: 305, metaSpend: 2140, tiktokSpend: 1480, shopeeSpend: 660 },
+    { date: "2024-02-03", spend: 4560, impressions: 228000, clicks: 7980, conversions: 325, metaSpend: 2280, tiktokSpend: 1580, shopeeSpend: 700 },
+    { date: "2024-02-04", spend: 4120, impressions: 206000, clicks: 7150, conversions: 290, metaSpend: 2060, tiktokSpend: 1420, shopeeSpend: 640 },
+    { date: "2024-02-05", spend: 3890, impressions: 194000, clicks: 6780, conversions: 275, metaSpend: 1950, tiktokSpend: 1340, shopeeSpend: 600 },
+    { date: "2024-02-06", spend: 4350, impressions: 218000, clicks: 7620, conversions: 310, metaSpend: 2180, tiktokSpend: 1500, shopeeSpend: 670 },
+    { date: "2024-02-07", spend: 4680, impressions: 234000, clicks: 8190, conversions: 335, metaSpend: 2340, tiktokSpend: 1620, shopeeSpend: 720 },
 ]
 
 export const mockPlatformMetrics: PlatformMetrics[] = [
     {
         platform: "meta",
         spend: 12450,
+        revenue: 39840,
         impressions: 650000,
         clicks: 23105,
         conversions: 892,
-        roas: 3.2
+        roas: 3.2,
+        spendChange: 15.2,
+        roasChange: 8.5
     },
     {
         platform: "tiktok",
         spend: 8234,
+        revenue: 23055,
         impressions: 420000,
         clicks: 15432,
         conversions: 645,
-        roas: 2.8
+        roas: 2.8,
+        spendChange: 22.1,
+        roasChange: -3.2
     },
     {
         platform: "shopee",
         spend: 3852,
+        revenue: 15793,
         impressions: 130000,
         clicks: 6694,
         conversions: 310,
-        roas: 4.1
+        roas: 4.1,
+        spendChange: 8.7,
+        roasChange: 12.3
     }
 ]
 
 export const mockDashboardMetrics: DashboardMetrics = {
     totalSpend: 24536,
+    totalRevenue: 83422,
     totalImpressions: 1200000,
     totalClicks: 45231,
     totalConversions: 1847,
     averageRoas: 3.4,
     spendChange: 12.5,
+    revenueChange: 18.7,
     impressionsChange: 8.2,
     clicksChange: 15.3,
-    conversionsChange: 22.1
+    conversionsChange: 22.1,
+    roasChange: 5.5
 }
 
 export const mockConnectedAccounts: ConnectedAccount[] = [
