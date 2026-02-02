@@ -2,11 +2,13 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/ads-aggregator/ads-aggregator/internal/delivery/http/middleware"
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
+	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/cache"
 	"github.com/ads-aggregator/ads-aggregator/internal/usecase/analytics"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,11 +17,15 @@ import (
 // AnalyticsHandler handles analytics-related HTTP requests
 type AnalyticsHandler struct {
 	analyticsService *analytics.Service
+	cache            *cache.Cache
 }
 
 // NewAnalyticsHandler creates a new analytics handler
-func NewAnalyticsHandler(analyticsService *analytics.Service) *AnalyticsHandler {
-	return &AnalyticsHandler{analyticsService: analyticsService}
+func NewAnalyticsHandler(analyticsService *analytics.Service, cache *cache.Cache) *AnalyticsHandler {
+	return &AnalyticsHandler{
+		analyticsService: analyticsService,
+		cache:            cache,
+	}
 }
 
 // CalculateMetricsRequest is the API request for metrics calculation
@@ -156,18 +162,52 @@ func (h *AnalyticsHandler) CalculateMetrics(c *gin.Context) {
 	})
 }
 
-// GetDashboard returns dashboard metrics
+// GetDashboard returns dashboard metrics with Redis caching
 func (h *AnalyticsHandler) GetDashboard(c *gin.Context) {
-	orgID, _ := middleware.GetOrgID(c)
+	orgID, ok := middleware.GetOrgID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Organization not found in context"})
+		return
+	}
+
 	dateRange := parseDateRangeFromQuery(c)
 
+	// Generate cache key
+	cacheKey := cache.DashboardCacheKey(orgID, dateRange.StartDate, dateRange.EndDate)
+
+	// Try to get from cache first
+	if h.cache != nil {
+		var cachedDashboard analytics.DashboardMetrics
+		if err := h.cache.Get(c.Request.Context(), cacheKey, &cachedDashboard); err == nil {
+			// Cache hit - return cached data
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    cachedDashboard,
+				"cached":  true,
+			})
+			return
+		}
+	}
+
+	// Cache miss - fetch from service
 	dashboard, err := h.analyticsService.GetDashboardMetrics(c.Request.Context(), orgID, dateRange)
 	if err != nil {
 		respondWithError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": dashboard})
+	// Store in cache (non-blocking, ignore errors)
+	if h.cache != nil {
+		go func() {
+			_ = h.cache.Set(c.Request.Context(), cacheKey, dashboard, cache.DashboardTTL)
+		}()
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    dashboard,
+		"cached":  false,
+	})
 }
 
 // GetOverview returns overview metrics
@@ -198,14 +238,160 @@ func (h *AnalyticsHandler) GetPlatformComparison(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": report.ByPlatform})
 }
 
-// GetTrends returns metric trends
+// TimeSeriesResponse represents the time series API response format
+type TimeSeriesResponse struct {
+	DateRange   entity.DateRange           `json:"date_range"`
+	Granularity string                     `json:"granularity"`
+	Data        []entity.DailyMetricsTrend `json:"data"`
+	Totals      *TotalsResponse            `json:"totals,omitempty"`
+}
+
+// TotalsResponse contains summary totals for the time series
+type TotalsResponse struct {
+	Spend       float64 `json:"spend"`
+	Impressions int64   `json:"impressions"`
+	Clicks      int64   `json:"clicks"`
+	Conversions int64   `json:"conversions"`
+	Revenue     float64 `json:"revenue"`
+}
+
+// GetTrends returns metric trends (time series data)
 func (h *AnalyticsHandler) GetTrends(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
+	orgID, ok := middleware.GetOrgID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Organization not found in context"})
+		return
+	}
+
+	dateRange := parseDateRangeFromQuery(c)
+	platform := c.Query("platforms")
+	granularity := c.DefaultQuery("granularity", "day")
+
+	// Get time series metrics
+	trend, err := h.analyticsService.GetTimeSeriesMetrics(c.Request.Context(), orgID, dateRange, platform, granularity)
+	if err != nil {
+		respondWithError(c, err)
+		return
+	}
+
+	// Calculate totals from the trend data
+	var totals TotalsResponse
+	for _, t := range trend {
+		spendFloat, _ := t.Spend.Float64()
+		totals.Spend += spendFloat
+		totals.Impressions += t.Impressions
+		totals.Clicks += t.Clicks
+		totals.Conversions += t.Conversions
+		// Revenue is calculated from ROAS * Spend
+		if t.ROAS > 0 {
+			totals.Revenue += spendFloat * t.ROAS
+		}
+	}
+
+	response := TimeSeriesResponse{
+		DateRange:   dateRange,
+		Granularity: granularity,
+		Data:        trend,
+		Totals:      &totals,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// TopPerformersResponse represents the top performers API response
+type TopPerformersResponse struct {
+	Campaigns []CampaignPerformanceResponse `json:"campaigns"`
+	Metric    string                        `json:"metric"`
+	Limit     int                           `json:"limit"`
+}
+
+// CampaignPerformanceResponse represents a single campaign performance entry
+type CampaignPerformanceResponse struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Platform string  `json:"platform"`
+	Status   string  `json:"status"`
+	Spend    float64 `json:"spend"`
+	ROAS     float64 `json:"roas"`
+	CTR      float64 `json:"ctr"`
+	CPA      float64 `json:"cpa"`
+	Change   float64 `json:"change"`
+	Trend    string  `json:"trend"` // "up", "down", "stable"
 }
 
 // GetTopPerformers returns top performing campaigns
 func (h *AnalyticsHandler) GetTopPerformers(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
+	orgID, ok := middleware.GetOrgID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Organization not found in context"})
+		return
+	}
+
+	dateRange := parseDateRangeFromQuery(c)
+	limitStr := c.DefaultQuery("limit", "5")
+	metric := c.DefaultQuery("metric", "roas")
+
+	limit := 5
+	if l, err := parseInt(limitStr); err == nil && l > 0 {
+		limit = l
+	}
+
+	// Get top campaigns from service
+	topCampaigns, err := h.analyticsService.GetTopCampaigns(c.Request.Context(), orgID, dateRange, limit)
+	if err != nil {
+		respondWithError(c, err)
+		return
+	}
+
+	// Convert to response format
+	campaigns := make([]CampaignPerformanceResponse, 0, len(topCampaigns))
+	for _, tc := range topCampaigns {
+		spendFloat, _ := tc.Spend.Float64()
+		cpaFloat := float64(0)
+		if tc.Conversions > 0 {
+			cpaFloat = spendFloat / float64(tc.Conversions)
+		}
+
+		// Determine trend based on ROAS performance
+		trend := "stable"
+		if tc.ROAS > 3.0 {
+			trend = "up"
+		} else if tc.ROAS < 1.0 {
+			trend = "down"
+		}
+
+		campaigns = append(campaigns, CampaignPerformanceResponse{
+			ID:       tc.ID.String(),
+			Name:     tc.Name,
+			Platform: string(tc.Platform),
+			Status:   "active", // Default status since TopPerformer doesn't have it
+			Spend:    spendFloat,
+			ROAS:     tc.ROAS,
+			CTR:      tc.CTR,
+			CPA:      cpaFloat,
+			Change:   0, // Change calculation would require previous period data
+			Trend:    trend,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": TopPerformersResponse{
+			Campaigns: campaigns,
+			Metric:    metric,
+			Limit:     limit,
+		},
+	})
+}
+
+// parseInt parses a string to int
+func parseInt(s string) (int, error) {
+	var result int
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
 }
 
 // GenerateReport generates a downloadable report

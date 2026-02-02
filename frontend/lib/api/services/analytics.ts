@@ -15,6 +15,19 @@ import {
 // Analytics API Service
 // ============================================
 
+// Helper to format date for backend API (expects YYYY-MM-DD)
+function formatDate(date: Date | string): string {
+  if (typeof date === "string") {
+    // If already a string, try to parse and format
+    const parsed = new Date(date);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split("T")[0];
+    }
+    return date;
+  }
+  return date.toISOString().split("T")[0];
+}
+
 export interface ComparisonData {
   current: AdMetrics;
   previous: AdMetrics;
@@ -40,14 +53,15 @@ export interface ReportData {
 export const analyticsApi = {
   /**
    * Get dashboard summary
+   * Backend: GET /dashboard/summary
    */
   async getSummary(dateRange: DateRange): Promise<DashboardSummary> {
     const response = await apiGet<ApiResponse<DashboardSummary>>(
-      "/analytics/summary",
+      "/dashboard/summary",
       {
         params: {
-          from: dateRange.from,
-          to: dateRange.to,
+          start_date: formatDate(dateRange.from),
+          end_date: formatDate(dateRange.to),
         },
       }
     );
@@ -56,20 +70,17 @@ export const analyticsApi = {
 
   /**
    * Get time series data
+   * Backend: GET /dashboard/timeseries
    */
   async getTimeSeries(params: AnalyticsParams): Promise<TimeSeriesData> {
     const response = await apiGet<ApiResponse<TimeSeriesData>>(
-      "/analytics/timeseries",
+      "/dashboard/timeseries",
       {
         params: {
-          from: params.dateRange.from,
-          to: params.dateRange.to,
+          start_date: formatDate(params.dateRange.from),
+          end_date: formatDate(params.dateRange.to),
           granularity: params.granularity || "day",
           platforms: params.platforms?.join(","),
-          accountIds: params.accountIds?.join(","),
-          campaignIds: params.campaignIds?.join(","),
-          metrics: params.metrics?.join(","),
-          groupBy: params.groupBy,
         },
       }
     );
@@ -78,17 +89,18 @@ export const analyticsApi = {
 
   /**
    * Get platform comparison data
+   * Backend: GET /dashboard/platforms
    */
   async getPlatformComparison(
     dateRange: DateRange,
     platforms?: Platform[]
   ): Promise<PlatformMetrics[]> {
     const response = await apiGet<ApiResponse<PlatformMetrics[]>>(
-      "/analytics/platforms",
+      "/dashboard/platforms",
       {
         params: {
-          from: dateRange.from,
-          to: dateRange.to,
+          start_date: formatDate(dateRange.from),
+          end_date: formatDate(dateRange.to),
           platforms: platforms?.join(","),
         },
       }
@@ -120,6 +132,7 @@ export const analyticsApi = {
 
   /**
    * Get top performing campaigns
+   * Backend: GET /dashboard/top-campaigns
    */
   async getTopCampaigns(
     dateRange: DateRange,
@@ -130,11 +143,11 @@ export const analyticsApi = {
     }
   ): Promise<CampaignPerformance[]> {
     const response = await apiGet<ApiResponse<CampaignPerformance[]>>(
-      "/analytics/top-campaigns",
+      "/dashboard/top-campaigns",
       {
         params: {
-          from: dateRange.from,
-          to: dateRange.to,
+          start_date: formatDate(dateRange.from),
+          end_date: formatDate(dateRange.to),
           metric: options?.metric || "roas",
           limit: options?.limit || 5,
           platforms: options?.platforms?.join(","),
@@ -146,6 +159,7 @@ export const analyticsApi = {
 
   /**
    * Get worst performing campaigns
+   * Backend: GET /dashboard/top-campaigns with sort=asc
    */
   async getBottomCampaigns(
     dateRange: DateRange,
@@ -156,14 +170,15 @@ export const analyticsApi = {
     }
   ): Promise<CampaignPerformance[]> {
     const response = await apiGet<ApiResponse<CampaignPerformance[]>>(
-      "/analytics/bottom-campaigns",
+      "/dashboard/top-campaigns",
       {
         params: {
-          from: dateRange.from,
-          to: dateRange.to,
+          start_date: formatDate(dateRange.from),
+          end_date: formatDate(dateRange.to),
           metric: options?.metric || "roas",
           limit: options?.limit || 5,
           platforms: options?.platforms?.join(","),
+          sort: "asc", // Get bottom performers
         },
       }
     );
@@ -227,8 +242,8 @@ export const analyticsApi = {
       ApiResponse<{ name: string; value: number; percentage: number }[]>
     >("/analytics/spend-breakdown", {
       params: {
-        from: dateRange.from,
-        to: dateRange.to,
+        start_date: formatDate(dateRange.from),
+        end_date: formatDate(dateRange.to),
         dimension,
       },
     });
@@ -252,8 +267,8 @@ export const analyticsApi = {
       }>
     >("/analytics/funnel", {
       params: {
-        from: dateRange.from,
-        to: dateRange.to,
+        start_date: formatDate(dateRange.from),
+        end_date: formatDate(dateRange.to),
         platforms: options?.platforms?.join(","),
         campaignIds: options?.campaignIds?.join(","),
       },
@@ -279,8 +294,8 @@ export const analyticsApi = {
       }>
     >("/analytics/insights", {
       params: {
-        from: dateRange.from,
-        to: dateRange.to,
+        start_date: formatDate(dateRange.from),
+        end_date: formatDate(dateRange.to),
       },
     });
     return response.data;

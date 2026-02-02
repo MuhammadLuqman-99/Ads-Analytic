@@ -14,11 +14,13 @@ import (
 	"github.com/ads-aggregator/ads-aggregator/internal/delivery/http/middleware"
 	"github.com/ads-aggregator/ads-aggregator/internal/delivery/http/router"
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
+	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/cache"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/meta"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/shopee"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/tiktok"
 	"github.com/ads-aggregator/ads-aggregator/pkg/jwt"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -44,6 +46,28 @@ func main() {
 	connectorRegistry := initConnectors(cfg)
 	log.Info().Int("connectors", len(connectorRegistry.List())).Msg("Platform connectors initialized")
 
+	// Initialize Redis client for caching
+	var redisClient *redis.Client
+	var appCache *cache.Cache
+	if cfg.Redis.Host != "" {
+		redisClient = redis.NewClient(&redis.Options{
+			Addr:     cfg.Redis.Addr(),
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+
+		// Test Redis connection
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			log.Warn().Err(err).Msg("Failed to connect to Redis, caching disabled")
+			redisClient = nil
+		} else {
+			log.Info().Str("addr", cfg.Redis.Addr()).Msg("Redis connected")
+			appCache = cache.NewCache(redisClient)
+		}
+	}
+
 	// Initialize JWT manager
 	jwtManager := jwt.NewManager(
 		cfg.JWT.Secret,
@@ -61,7 +85,7 @@ func main() {
 	// Initialize handlers (with nil services for now - would be injected with DI)
 	authHandler := handler.NewAuthHandler(nil)
 	platformHandler := handler.NewPlatformHandler(nil, nil)
-	analyticsHandler := handler.NewAnalyticsHandler(nil)
+	analyticsHandler := handler.NewAnalyticsHandler(nil, appCache)
 
 	// Initialize router
 	routerConfig := &router.Config{
@@ -112,6 +136,13 @@ func main() {
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Server forced to shutdown")
+	}
+
+	// Close Redis connection
+	if redisClient != nil {
+		if err := redisClient.Close(); err != nil {
+			log.Warn().Err(err).Msg("Error closing Redis connection")
+		}
 	}
 
 	log.Info().Msg("Server exited")
