@@ -10,9 +10,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "AdsAnalytics - Multi-Platform Ad Analytics Dashboard",
-  description: "Unified analytics dashboard for Meta, TikTok, and Shopee advertising campaigns. Track spend, ROAS, conversions, and performance metrics in one place.",
-  keywords: ["ads analytics", "meta ads", "tiktok ads", "shopee ads", "roas", "marketing dashboard"],
+  title: {
+    default: "AdsAnalytic - Semua Ads Data Dalam Satu Dashboard",
+    template: "%s | AdsAnalytic",
+  },
+  description: "Platform analitik iklan terbaik untuk peniaga e-commerce Malaysia. Gabungkan data Meta Ads, TikTok Ads, dan Shopee Ads dalam satu dashboard.",
+  keywords: ["ads analytics", "meta ads", "tiktok ads", "shopee ads", "roas", "marketing dashboard", "e-commerce malaysia"],
+  metadataBase: new URL("https://adsanalytic.com"),
 };
 
 export default function RootLayout({
@@ -21,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="ms">
       <body className={`${inter.variable} font-sans antialiased`}>
         <Providers>
           {children}
