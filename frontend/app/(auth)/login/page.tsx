@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { useForm } from "react-hook-form";
@@ -23,7 +23,7 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
@@ -179,5 +179,28 @@ export default function LoginPage() {
         </Link>
       </p>
     </AuthLayout>
+  );
+}
+
+function LoginFormFallback() {
+  return (
+    <AuthLayout
+      title="Welcome back"
+      description="Sign in to your account to continue"
+    >
+      <div className="space-y-4">
+        <div className="h-10 bg-slate-100 rounded animate-pulse" />
+        <div className="h-10 bg-slate-100 rounded animate-pulse" />
+        <div className="h-10 bg-slate-100 rounded animate-pulse" />
+      </div>
+    </AuthLayout>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFormFallback />}>
+      <LoginForm />
+    </Suspense>
   );
 }

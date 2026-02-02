@@ -18,6 +18,8 @@ const badgeVariants = cva(
                     "bg-amber-500/20 text-amber-400 border border-amber-500/30",
                 destructive:
                     "bg-red-500/20 text-red-400 border border-red-500/30",
+                outline:
+                    "bg-transparent text-slate-700 border border-slate-200",
                 meta:
                     "bg-blue-500/20 text-blue-400 border border-blue-500/30",
                 tiktok:
