@@ -1,13 +1,12 @@
 package middleware
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
+	"gorm.io/gorm"
 )
 
 // AdminRole represents admin role levels
@@ -21,176 +20,196 @@ const (
 
 // AdminUser represents an admin user
 type AdminUser struct {
-	ID          uuid.UUID `json:"id" db:"id"`
-	UserID      uuid.UUID `json:"user_id" db:"user_id"`
-	Role        AdminRole `json:"role" db:"role"`
-	Permissions []string  `json:"permissions" db:"permissions"`
+	ID              uuid.UUID `json:"id" gorm:"type:uuid;primaryKey"`
+	UserID          uuid.UUID `json:"user_id" gorm:"type:uuid;not null"`
+	Role            AdminRole `json:"role" gorm:"type:varchar(50);not null;default:'admin'"`
+	Permissions     []string  `json:"permissions" gorm:"-"`
+	PermissionsJSON string    `json:"-" gorm:"column:permissions;type:jsonb;default:'[]'"`
+}
+
+// TableName returns the table name for AdminUser
+func (AdminUser) TableName() string {
+	return "admin_users"
 }
 
 // AdminContextKey is the context key for admin user
-type AdminContextKey struct{}
+const AdminContextKey = "admin_user"
 
 // AdminMiddleware handles admin authentication and authorization
 type AdminMiddleware struct {
-	db *sqlx.DB
+	db *gorm.DB
 }
 
 // NewAdminMiddleware creates a new admin middleware
-func NewAdminMiddleware(db *sqlx.DB) *AdminMiddleware {
+func NewAdminMiddleware(db *gorm.DB) *AdminMiddleware {
 	return &AdminMiddleware{db: db}
 }
 
 // RequireAdmin requires the user to be an admin
-func (m *AdminMiddleware) RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (m *AdminMiddleware) RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		// Get user ID from auth context (assumes auth middleware ran first)
-		userID, ok := r.Context().Value(UserIDKey{}).(uuid.UUID)
-		if !ok {
-			respondError(w, http.StatusUnauthorized, "unauthorized")
+		userIDValue, exists := c.Get("user_id")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 
-		// Check if user is an admin
-		admin, err := m.getAdminUser(r.Context(), userID)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				respondError(w, http.StatusForbidden, "admin access required")
+		userID, ok := userIDValue.(uuid.UUID)
+		if !ok {
+			// Try string conversion
+			if userIDStr, ok := userIDValue.(string); ok {
+				var err error
+				userID, err = uuid.Parse(userIDStr)
+				if err != nil {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+					return
+				}
+			} else {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 				return
 			}
-			respondError(w, http.StatusInternalServerError, "failed to check admin status")
+		}
+
+		// Check if user is an admin
+		admin, err := m.getAdminUser(userID)
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to check admin status"})
 			return
 		}
 
 		// Add admin to context
-		ctx := context.WithValue(r.Context(), AdminContextKey{}, admin)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		c.Set(AdminContextKey, admin)
+		c.Next()
+	}
 }
 
 // RequireRole requires a specific admin role
-func (m *AdminMiddleware) RequireRole(roles ...AdminRole) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			admin, ok := r.Context().Value(AdminContextKey{}).(*AdminUser)
-			if !ok {
-				respondError(w, http.StatusForbidden, "admin access required")
-				return
-			}
+func (m *AdminMiddleware) RequireRole(roles ...AdminRole) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		adminValue, exists := c.Get(AdminContextKey)
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+			return
+		}
 
-			hasRole := false
-			for _, role := range roles {
-				if admin.Role == role {
-					hasRole = true
-					break
-				}
-			}
+		admin, ok := adminValue.(*AdminUser)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+			return
+		}
 
-			if !hasRole {
-				respondError(w, http.StatusForbidden, "insufficient permissions")
-				return
+		hasRole := false
+		for _, role := range roles {
+			if admin.Role == role {
+				hasRole = true
+				break
 			}
+		}
 
-			next.ServeHTTP(w, r)
-		})
+		if !hasRole {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+			return
+		}
+
+		c.Next()
 	}
 }
 
 // RequirePermission requires a specific permission
-func (m *AdminMiddleware) RequirePermission(permission string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			admin, ok := r.Context().Value(AdminContextKey{}).(*AdminUser)
-			if !ok {
-				respondError(w, http.StatusForbidden, "admin access required")
-				return
-			}
+func (m *AdminMiddleware) RequirePermission(permission string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		adminValue, exists := c.Get(AdminContextKey)
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+			return
+		}
 
-			// Super admin has all permissions
-			if admin.Role == AdminRoleSuperAdmin {
-				next.ServeHTTP(w, r)
-				return
-			}
+		admin, ok := adminValue.(*AdminUser)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+			return
+		}
 
-			hasPermission := false
-			for _, p := range admin.Permissions {
-				if p == permission || p == "*" {
-					hasPermission = true
-					break
-				}
-			}
+		// Super admin has all permissions
+		if admin.Role == AdminRoleSuperAdmin {
+			c.Next()
+			return
+		}
 
-			if !hasPermission {
-				respondError(w, http.StatusForbidden, "permission denied")
-				return
+		hasPermission := false
+		for _, p := range admin.Permissions {
+			if p == permission || p == "*" {
+				hasPermission = true
+				break
 			}
+		}
 
-			next.ServeHTTP(w, r)
-		})
+		if !hasPermission {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "permission denied"})
+			return
+		}
+
+		c.Next()
 	}
 }
 
 // getAdminUser retrieves the admin user from the database
-func (m *AdminMiddleware) getAdminUser(ctx context.Context, userID uuid.UUID) (*AdminUser, error) {
-	query := `
-		SELECT id, user_id, role, permissions
-		FROM admin_users
-		WHERE user_id = $1
-	`
-
+func (m *AdminMiddleware) getAdminUser(userID uuid.UUID) (*AdminUser, error) {
 	var admin AdminUser
-	var permissions []byte
 
-	err := m.db.QueryRowContext(ctx, query, userID).Scan(
-		&admin.ID, &admin.UserID, &admin.Role, &permissions,
-	)
+	err := m.db.Where("user_id = ?", userID).First(&admin).Error
 	if err != nil {
 		return nil, err
 	}
 
-	if len(permissions) > 0 {
-		json.Unmarshal(permissions, &admin.Permissions)
+	// Parse permissions JSON
+	if admin.PermissionsJSON != "" {
+		json.Unmarshal([]byte(admin.PermissionsJSON), &admin.Permissions)
 	}
 
 	return &admin, nil
 }
 
 // AuditLog logs admin actions
-func (m *AdminMiddleware) AuditLog(action string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			admin, _ := r.Context().Value(AdminContextKey{}).(*AdminUser)
+func (m *AdminMiddleware) AuditLog(action string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Log the action after the request completes
+		c.Next()
 
-			// Log the action after the request completes
-			defer func() {
-				if admin != nil {
-					m.logAdminAction(r.Context(), admin.ID, action, r)
-				}
-			}()
+		adminValue, exists := c.Get(AdminContextKey)
+		if !exists {
+			return
+		}
 
-			next.ServeHTTP(w, r)
-		})
+		admin, ok := adminValue.(*AdminUser)
+		if !ok {
+			return
+		}
+
+		m.logAdminAction(admin.ID, action, c)
 	}
 }
 
 // logAdminAction logs an admin action to the database
-func (m *AdminMiddleware) logAdminAction(ctx context.Context, adminID uuid.UUID, action string, r *http.Request) {
-	query := `
-		INSERT INTO admin_audit_log (admin_user_id, action, ip_address, details)
-		VALUES ($1, $2, $3, $4)
-	`
-
+func (m *AdminMiddleware) logAdminAction(adminID uuid.UUID, action string, c *gin.Context) {
 	details := map[string]interface{}{
-		"method": r.Method,
-		"path":   r.URL.Path,
-		"query":  r.URL.Query(),
+		"method": c.Request.Method,
+		"path":   c.Request.URL.Path,
+		"query":  c.Request.URL.Query(),
+		"status": c.Writer.Status(),
 	}
 	detailsJSON, _ := json.Marshal(details)
 
-	m.db.ExecContext(ctx, query, adminID, action, getClientIP(r), detailsJSON)
+	m.db.Exec(`
+		INSERT INTO admin_audit_log (admin_user_id, action, ip_address, details)
+		VALUES (?, ?, ?, ?)
+	`, adminID, action, getClientIP(c.Request), detailsJSON)
 }
-
-// UserIDKey is used for user ID context key
-type UserIDKey struct{}
 
 // Helper function to get client IP
 func getClientIP(r *http.Request) string {
@@ -205,15 +224,12 @@ func getClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// respondError sends an error response
-func respondError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
-// GetAdminFromContext retrieves the admin user from context
-func GetAdminFromContext(ctx context.Context) *AdminUser {
-	admin, _ := ctx.Value(AdminContextKey{}).(*AdminUser)
+// GetAdminFromContext retrieves the admin user from Gin context
+func GetAdminFromContext(c *gin.Context) *AdminUser {
+	adminValue, exists := c.Get(AdminContextKey)
+	if !exists {
+		return nil
+	}
+	admin, _ := adminValue.(*AdminUser)
 	return admin
 }

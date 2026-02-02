@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	domain "github.com/MuhammadLuqman-99/ads-analytics/internal/domain/analytics"
+	domain "github.com/ads-aggregator/ads-aggregator/internal/domain/analytics"
 )
 
 // Tracker handles analytics event tracking

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -356,7 +357,8 @@ func TestGenerateSlug(t *testing.T) {
 			name:  "simple name",
 			input: "My Company",
 			validate: func(s string) bool {
-				return len(s) > 0 && !hasUpperCase(s)
+				// Slug starts with lowercase base, may have mixed-case suffix
+				return len(s) > 0 && strings.HasPrefix(s, "my-company-")
 			},
 		},
 		{

@@ -1,5 +1,7 @@
 package email
 
+import "fmt"
+
 // baseTemplate is the base HTML template for all emails
 const baseTemplate = `
 <!DOCTYPE html>

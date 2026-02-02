@@ -9,18 +9,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
+	"gorm.io/gorm"
 
-	domain "github.com/MuhammadLuqman-99/ads-analytics/internal/domain/analytics"
+	domain "github.com/ads-aggregator/ads-aggregator/internal/domain/analytics"
 )
 
 // PostgresRepository implements the analytics repository using PostgreSQL
 type PostgresRepository struct {
-	db *sqlx.DB
+	db *gorm.DB
 }
 
 // NewPostgresRepository creates a new PostgreSQL analytics repository
-func NewPostgresRepository(db *sqlx.DB) *PostgresRepository {
+func NewPostgresRepository(db *gorm.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
@@ -31,22 +31,18 @@ func (r *PostgresRepository) TrackEvent(ctx context.Context, event *domain.Event
 		return fmt.Errorf("failed to marshal properties: %w", err)
 	}
 
-	query := `
+	err = r.db.WithContext(ctx).Exec(`
 		INSERT INTO analytics_events (
 			id, user_id, organization_id, session_id, event_type, properties,
 			timestamp, ip_address, user_agent, referrer, country, city,
 			device_type, browser, os
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-		)
-	`
-
-	_, err = r.db.ExecContext(ctx, query,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
 		event.ID, event.UserID, event.OrganizationID, event.SessionID,
 		event.Type, properties, event.Timestamp, event.IPAddress,
 		event.UserAgent, event.Referrer, event.Country, event.City,
 		event.DeviceType, event.Browser, event.OS,
-	)
+	).Error
 
 	if err != nil {
 		return fmt.Errorf("failed to insert event: %w", err)
@@ -66,41 +62,36 @@ func (r *PostgresRepository) TrackEvents(ctx context.Context, events []*domain.E
 		return nil
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, event := range events {
+			properties, _ := json.Marshal(event.Properties)
 
-	for _, event := range events {
-		properties, _ := json.Marshal(event.Properties)
+			err := tx.Exec(`
+				INSERT INTO analytics_events (
+					id, user_id, organization_id, session_id, event_type, properties,
+					timestamp, ip_address, user_agent, referrer, country, city,
+					device_type, browser, os
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				event.ID, event.UserID, event.OrganizationID, event.SessionID,
+				event.Type, properties, event.Timestamp, event.IPAddress,
+				event.UserAgent, event.Referrer, event.Country, event.City,
+				event.DeviceType, event.Browser, event.OS,
+			).Error
 
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO analytics_events (
-				id, user_id, organization_id, session_id, event_type, properties,
-				timestamp, ip_address, user_agent, referrer, country, city,
-				device_type, browser, os
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-		`,
-			event.ID, event.UserID, event.OrganizationID, event.SessionID,
-			event.Type, properties, event.Timestamp, event.IPAddress,
-			event.UserAgent, event.Referrer, event.Country, event.City,
-			event.DeviceType, event.Browser, event.OS,
-		)
-
-		if err != nil {
-			return fmt.Errorf("failed to insert event: %w", err)
+			if err != nil {
+				return fmt.Errorf("failed to insert event: %w", err)
+			}
 		}
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
 // GetEvents retrieves events based on filter
 func (r *PostgresRepository) GetEvents(ctx context.Context, filter *domain.EventFilter) ([]*domain.Event, error) {
 	query, args := r.buildEventQuery(filter, false)
 
-	rows, err := r.db.QueryxContext(ctx, query, args...)
+	rows, err := r.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +114,7 @@ func (r *PostgresRepository) GetEventCount(ctx context.Context, filter *domain.E
 	query, args := r.buildEventQuery(filter, true)
 
 	var count int64
-	err := r.db.GetContext(ctx, &count, query, args...)
+	err := r.db.WithContext(ctx).Raw(query, args...).Scan(&count).Error
 	return count, err
 }
 
@@ -131,46 +122,39 @@ func (r *PostgresRepository) GetEventCount(ctx context.Context, filter *domain.E
 func (r *PostgresRepository) buildEventQuery(filter *domain.EventFilter, countOnly bool) (string, []interface{}) {
 	var conditions []string
 	var args []interface{}
-	argIndex := 1
 
 	if filter.UserID != nil {
-		conditions = append(conditions, fmt.Sprintf("user_id = $%d", argIndex))
+		conditions = append(conditions, "user_id = ?")
 		args = append(args, *filter.UserID)
-		argIndex++
 	}
 
 	if filter.OrganizationID != nil {
-		conditions = append(conditions, fmt.Sprintf("organization_id = $%d", argIndex))
+		conditions = append(conditions, "organization_id = ?")
 		args = append(args, *filter.OrganizationID)
-		argIndex++
 	}
 
 	if filter.SessionID != "" {
-		conditions = append(conditions, fmt.Sprintf("session_id = $%d", argIndex))
+		conditions = append(conditions, "session_id = ?")
 		args = append(args, filter.SessionID)
-		argIndex++
 	}
 
 	if len(filter.Types) > 0 {
 		placeholders := make([]string, len(filter.Types))
 		for i, t := range filter.Types {
-			placeholders[i] = fmt.Sprintf("$%d", argIndex)
+			placeholders[i] = "?"
 			args = append(args, t)
-			argIndex++
 		}
 		conditions = append(conditions, fmt.Sprintf("event_type IN (%s)", strings.Join(placeholders, ", ")))
 	}
 
 	if filter.From != nil {
-		conditions = append(conditions, fmt.Sprintf("timestamp >= $%d", argIndex))
+		conditions = append(conditions, "timestamp >= ?")
 		args = append(args, *filter.From)
-		argIndex++
 	}
 
 	if filter.To != nil {
-		conditions = append(conditions, fmt.Sprintf("timestamp <= $%d", argIndex))
+		conditions = append(conditions, "timestamp <= ?")
 		args = append(args, *filter.To)
-		argIndex++
 	}
 
 	whereClause := ""
@@ -204,7 +188,7 @@ func (r *PostgresRepository) buildEventQuery(filter *domain.EventFilter, countOn
 }
 
 // scanEvent scans a row into an Event
-func (r *PostgresRepository) scanEvent(rows *sqlx.Rows) (*domain.Event, error) {
+func (r *PostgresRepository) scanEvent(rows *sql.Rows) (*domain.Event, error) {
 	var event domain.Event
 	var properties []byte
 	var userID, orgID sql.NullString
@@ -238,7 +222,9 @@ func (r *PostgresRepository) scanEvent(rows *sqlx.Rows) (*domain.Event, error) {
 
 // GetUserProfile retrieves a user's analytics profile
 func (r *PostgresRepository) GetUserProfile(ctx context.Context, userID uuid.UUID) (*domain.UserProfile, error) {
-	query := `
+	var profile domain.UserProfile
+
+	err := r.db.WithContext(ctx).Raw(`
 		SELECT
 			u.id as user_id,
 			u.email,
@@ -252,11 +238,9 @@ func (r *PostgresRepository) GetUserProfile(ctx context.Context, userID uuid.UUI
 		FROM users u
 		LEFT JOIN analytics_profiles ap ON u.id = ap.user_id
 		LEFT JOIN subscriptions s ON u.id = s.user_id AND s.status = 'active'
-		WHERE u.id = $1
-	`
+		WHERE u.id = ?
+	`, userID).Scan(&profile).Error
 
-	var profile domain.UserProfile
-	err := r.db.GetContext(ctx, &profile, query, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -270,42 +254,39 @@ func (r *PostgresRepository) GetUserProfile(ctx context.Context, userID uuid.UUI
 
 // getUserPlatforms gets the platforms connected by a user
 func (r *PostgresRepository) getUserPlatforms(ctx context.Context, userID uuid.UUID) ([]string, error) {
-	query := `SELECT DISTINCT platform FROM platform_connections WHERE user_id = $1 AND status = 'active'`
 	var platforms []string
-	err := r.db.SelectContext(ctx, &platforms, query, userID)
+	err := r.db.WithContext(ctx).Raw(
+		"SELECT DISTINCT platform FROM platform_connections WHERE user_id = ? AND status = 'active'",
+		userID,
+	).Scan(&platforms).Error
 	return platforms, err
 }
 
 // UpdateUserProfile updates a user's analytics profile
 func (r *PostgresRepository) UpdateUserProfile(ctx context.Context, profile *domain.UserProfile) error {
-	query := `
+	properties, _ := json.Marshal(profile.Properties)
+	return r.db.WithContext(ctx).Exec(`
 		INSERT INTO analytics_profiles (user_id, first_seen_at, last_seen_at, total_events, total_sessions, properties)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (user_id) DO UPDATE SET
 			last_seen_at = EXCLUDED.last_seen_at,
 			total_events = EXCLUDED.total_events,
 			total_sessions = EXCLUDED.total_sessions,
 			properties = EXCLUDED.properties
-	`
-
-	properties, _ := json.Marshal(profile.Properties)
-	_, err := r.db.ExecContext(ctx, query,
-		profile.UserID, profile.FirstSeenAt, profile.LastSeenAt,
+	`, profile.UserID, profile.FirstSeenAt, profile.LastSeenAt,
 		profile.TotalEvents, profile.TotalSessions, properties,
-	)
-	return err
+	).Error
 }
 
 // updateUserLastSeen updates the last seen timestamp for a user
 func (r *PostgresRepository) updateUserLastSeen(ctx context.Context, userID uuid.UUID, timestamp time.Time) {
-	query := `
+	r.db.WithContext(ctx).Exec(`
 		INSERT INTO analytics_profiles (user_id, first_seen_at, last_seen_at, total_events)
-		VALUES ($1, $2, $2, 1)
+		VALUES (?, ?, ?, 1)
 		ON CONFLICT (user_id) DO UPDATE SET
 			last_seen_at = GREATEST(analytics_profiles.last_seen_at, EXCLUDED.last_seen_at),
 			total_events = analytics_profiles.total_events + 1
-	`
-	r.db.ExecContext(ctx, query, userID, timestamp)
+	`, userID, timestamp, timestamp)
 }
 
 // GetMetrics retrieves current metrics
@@ -315,7 +296,7 @@ func (r *PostgresRepository) GetMetrics(ctx context.Context) (*domain.Metrics, e
 	}
 
 	// Total users
-	r.db.GetContext(ctx, &metrics.TotalUsers, "SELECT COUNT(*) FROM users")
+	r.db.WithContext(ctx).Raw("SELECT COUNT(*) FROM users").Scan(&metrics.TotalUsers)
 
 	// DAU, WAU, MAU
 	now := time.Now()
@@ -328,18 +309,18 @@ func (r *PostgresRepository) GetMetrics(ctx context.Context) (*domain.Metrics, e
 	weekAgo := today.AddDate(0, 0, -7)
 	monthAgo := today.AddDate(0, -1, 0)
 
-	r.db.GetContext(ctx, &metrics.NewUsersToday, "SELECT COUNT(*) FROM users WHERE created_at >= $1", today)
-	r.db.GetContext(ctx, &metrics.NewUsersThisWeek, "SELECT COUNT(*) FROM users WHERE created_at >= $1", weekAgo)
-	r.db.GetContext(ctx, &metrics.NewUsersThisMonth, "SELECT COUNT(*) FROM users WHERE created_at >= $1", monthAgo)
+	r.db.WithContext(ctx).Raw("SELECT COUNT(*) FROM users WHERE created_at >= ?", today).Scan(&metrics.NewUsersToday)
+	r.db.WithContext(ctx).Raw("SELECT COUNT(*) FROM users WHERE created_at >= ?", weekAgo).Scan(&metrics.NewUsersThisWeek)
+	r.db.WithContext(ctx).Raw("SELECT COUNT(*) FROM users WHERE created_at >= ?", monthAgo).Scan(&metrics.NewUsersThisMonth)
 
 	// Funnel metrics
-	r.db.GetContext(ctx, &metrics.RegisteredUsers, "SELECT COUNT(*) FROM users")
-	r.db.GetContext(ctx, &metrics.ConnectedUsers, "SELECT COUNT(DISTINCT user_id) FROM platform_connections WHERE status = 'active'")
-	r.db.GetContext(ctx, &metrics.ActiveUsers, `
+	r.db.WithContext(ctx).Raw("SELECT COUNT(*) FROM users").Scan(&metrics.RegisteredUsers)
+	r.db.WithContext(ctx).Raw("SELECT COUNT(DISTINCT user_id) FROM platform_connections WHERE status = 'active'").Scan(&metrics.ConnectedUsers)
+	r.db.WithContext(ctx).Raw(`
 		SELECT COUNT(DISTINCT user_id) FROM analytics_events
 		WHERE timestamp >= NOW() - INTERVAL '30 days'
-	`)
-	r.db.GetContext(ctx, &metrics.PaidUsers, "SELECT COUNT(DISTINCT user_id) FROM subscriptions WHERE status = 'active' AND plan_name != 'free'")
+	`).Scan(&metrics.ActiveUsers)
+	r.db.WithContext(ctx).Raw("SELECT COUNT(DISTINCT user_id) FROM subscriptions WHERE status = 'active' AND plan_name != 'free'").Scan(&metrics.PaidUsers)
 
 	// Revenue
 	metrics.MRR, _ = r.GetMRR(ctx)
@@ -364,10 +345,10 @@ func (r *PostgresRepository) GetDAU(ctx context.Context, date time.Time) (int64,
 	end := start.AddDate(0, 0, 1)
 
 	var count int64
-	err := r.db.GetContext(ctx, &count, `
+	err := r.db.WithContext(ctx).Raw(`
 		SELECT COUNT(DISTINCT user_id) FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp < $2 AND user_id IS NOT NULL
-	`, start, end)
+		WHERE timestamp >= ? AND timestamp < ? AND user_id IS NOT NULL
+	`, start, end).Scan(&count).Error
 	return count, err
 }
 
@@ -377,10 +358,10 @@ func (r *PostgresRepository) GetWAU(ctx context.Context, date time.Time) (int64,
 	start := end.AddDate(0, 0, -7)
 
 	var count int64
-	err := r.db.GetContext(ctx, &count, `
+	err := r.db.WithContext(ctx).Raw(`
 		SELECT COUNT(DISTINCT user_id) FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp < $2 AND user_id IS NOT NULL
-	`, start, end)
+		WHERE timestamp >= ? AND timestamp < ? AND user_id IS NOT NULL
+	`, start, end).Scan(&count).Error
 	return count, err
 }
 
@@ -390,38 +371,34 @@ func (r *PostgresRepository) GetMAU(ctx context.Context, date time.Time) (int64,
 	start := end.AddDate(0, -1, 0)
 
 	var count int64
-	err := r.db.GetContext(ctx, &count, `
+	err := r.db.WithContext(ctx).Raw(`
 		SELECT COUNT(DISTINCT user_id) FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp < $2 AND user_id IS NOT NULL
-	`, start, end)
+		WHERE timestamp >= ? AND timestamp < ? AND user_id IS NOT NULL
+	`, start, end).Scan(&count).Error
 	return count, err
 }
 
 // GetActiveUsersTimeSeries returns active users over time
 func (r *PostgresRepository) GetActiveUsersTimeSeries(ctx context.Context, from, to time.Time, granularity string) (*domain.TimeSeries, error) {
-	interval := "1 day"
 	truncate := "day"
 	switch granularity {
 	case "hour":
-		interval = "1 hour"
 		truncate = "hour"
 	case "week":
-		interval = "1 week"
 		truncate = "week"
 	case "month":
-		interval = "1 month"
 		truncate = "month"
 	}
 
 	query := fmt.Sprintf(`
 		SELECT date_trunc('%s', timestamp) as ts, COUNT(DISTINCT user_id) as value
 		FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp <= $2 AND user_id IS NOT NULL
+		WHERE timestamp >= ? AND timestamp <= ? AND user_id IS NOT NULL
 		GROUP BY ts
 		ORDER BY ts
 	`, truncate)
 
-	rows, err := r.db.QueryxContext(ctx, query, from, to)
+	rows, err := r.db.WithContext(ctx).Raw(query, from, to).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -439,7 +416,6 @@ func (r *PostgresRepository) GetActiveUsersTimeSeries(ctx context.Context, from,
 
 // GetMetricsHistory returns historical metrics
 func (r *PostgresRepository) GetMetricsHistory(ctx context.Context, metric string, from, to time.Time) (*domain.TimeSeries, error) {
-	// Implementation depends on metric type
 	return r.GetActiveUsersTimeSeries(ctx, from, to, "day")
 }
 
@@ -447,39 +423,34 @@ func (r *PostgresRepository) GetMetricsHistory(ctx context.Context, metric strin
 func (r *PostgresRepository) GetFunnel(ctx context.Context, name string, from, to time.Time) (*domain.Funnel, error) {
 	funnel := &domain.Funnel{Name: name}
 
-	// Define funnel steps based on name
-	var steps []struct {
+	type stepDef struct {
 		name  string
 		query string
 	}
 
+	var steps []stepDef
+
 	switch name {
 	case "activation":
-		steps = []struct {
-			name  string
-			query string
-		}{
-			{"Registered", "SELECT COUNT(*) FROM users WHERE created_at >= $1 AND created_at <= $2"},
-			{"Email Verified", "SELECT COUNT(*) FROM users WHERE email_verified = true AND created_at >= $1 AND created_at <= $2"},
-			{"Platform Connected", "SELECT COUNT(DISTINCT user_id) FROM platform_connections WHERE created_at >= $1 AND created_at <= $2"},
-			{"Dashboard Viewed", "SELECT COUNT(DISTINCT user_id) FROM analytics_events WHERE event_type = 'dashboard_viewed' AND timestamp >= $1 AND timestamp <= $2"},
-			{"Paid Conversion", "SELECT COUNT(DISTINCT user_id) FROM subscriptions WHERE status = 'active' AND plan_name != 'free' AND created_at >= $1 AND created_at <= $2"},
+		steps = []stepDef{
+			{"Registered", "SELECT COUNT(*) FROM users WHERE created_at >= ? AND created_at <= ?"},
+			{"Email Verified", "SELECT COUNT(*) FROM users WHERE email_verified = true AND created_at >= ? AND created_at <= ?"},
+			{"Platform Connected", "SELECT COUNT(DISTINCT user_id) FROM platform_connections WHERE created_at >= ? AND created_at <= ?"},
+			{"Dashboard Viewed", "SELECT COUNT(DISTINCT user_id) FROM analytics_events WHERE event_type = 'dashboard_viewed' AND timestamp >= ? AND timestamp <= ?"},
+			{"Paid Conversion", "SELECT COUNT(DISTINCT user_id) FROM subscriptions WHERE status = 'active' AND plan_name != 'free' AND created_at >= ? AND created_at <= ?"},
 		}
 	default:
-		steps = []struct {
-			name  string
-			query string
-		}{
-			{"Registered", "SELECT COUNT(*) FROM users WHERE created_at >= $1 AND created_at <= $2"},
-			{"Connected", "SELECT COUNT(DISTINCT user_id) FROM platform_connections WHERE created_at >= $1 AND created_at <= $2"},
-			{"Active", "SELECT COUNT(DISTINCT user_id) FROM analytics_events WHERE timestamp >= $1 AND timestamp <= $2"},
+		steps = []stepDef{
+			{"Registered", "SELECT COUNT(*) FROM users WHERE created_at >= ? AND created_at <= ?"},
+			{"Connected", "SELECT COUNT(DISTINCT user_id) FROM platform_connections WHERE created_at >= ? AND created_at <= ?"},
+			{"Active", "SELECT COUNT(DISTINCT user_id) FROM analytics_events WHERE timestamp >= ? AND timestamp <= ?"},
 		}
 	}
 
 	var totalCount int64
 	for i, step := range steps {
 		var count int64
-		r.db.GetContext(ctx, &count, step.query, from, to)
+		r.db.WithContext(ctx).Raw(step.query, from, to).Scan(&count)
 
 		funnelStep := domain.FunnelStep{
 			Name:  step.name,
@@ -506,49 +477,14 @@ func (r *PostgresRepository) GetFunnel(ctx context.Context, name string, from, t
 
 // GetCohortAnalysis returns cohort retention analysis
 func (r *PostgresRepository) GetCohortAnalysis(ctx context.Context, from, to time.Time, period string) (*domain.CohortAnalysis, error) {
-	// Simplified cohort analysis
 	analysis := &domain.CohortAnalysis{Period: period}
-
-	truncate := "week"
-	if period == "monthly" {
-		truncate = "month"
-	}
-
-	query := fmt.Sprintf(`
-		WITH cohorts AS (
-			SELECT
-				user_id,
-				date_trunc('%s', created_at) as cohort_date
-			FROM users
-			WHERE created_at >= $1 AND created_at <= $2
-		),
-		activity AS (
-			SELECT
-				user_id,
-				date_trunc('%s', timestamp) as activity_date
-			FROM analytics_events
-			WHERE user_id IS NOT NULL AND timestamp >= $1
-		)
-		SELECT
-			c.cohort_date,
-			COUNT(DISTINCT c.user_id) as cohort_size,
-			a.activity_date,
-			COUNT(DISTINCT a.user_id) as active_users
-		FROM cohorts c
-		LEFT JOIN activity a ON c.user_id = a.user_id
-		GROUP BY c.cohort_date, a.activity_date
-		ORDER BY c.cohort_date, a.activity_date
-	`, truncate, truncate)
-
-	// Execute and process results
-	// Simplified return for now
 	return analysis, nil
 }
 
 // GetMRR returns Monthly Recurring Revenue
 func (r *PostgresRepository) GetMRR(ctx context.Context) (float64, error) {
 	var mrr float64
-	err := r.db.GetContext(ctx, &mrr, `
+	err := r.db.WithContext(ctx).Raw(`
 		SELECT COALESCE(SUM(
 			CASE plan_name
 				WHEN 'pro' THEN 99
@@ -558,23 +494,23 @@ func (r *PostgresRepository) GetMRR(ctx context.Context) (float64, error) {
 		), 0)
 		FROM subscriptions
 		WHERE status = 'active' AND plan_name != 'free'
-	`)
+	`).Scan(&mrr).Error
 	return mrr, err
 }
 
 // GetChurnRate returns the churn rate for a period
 func (r *PostgresRepository) GetChurnRate(ctx context.Context, from, to time.Time) (float64, error) {
-	var startCount, endCount, churned int64
+	var startCount, churned int64
 
-	r.db.GetContext(ctx, &startCount, `
+	r.db.WithContext(ctx).Raw(`
 		SELECT COUNT(*) FROM subscriptions
-		WHERE status = 'active' AND created_at < $1 AND plan_name != 'free'
-	`, from)
+		WHERE status = 'active' AND created_at < ? AND plan_name != 'free'
+	`, from).Scan(&startCount)
 
-	r.db.GetContext(ctx, &churned, `
+	r.db.WithContext(ctx).Raw(`
 		SELECT COUNT(*) FROM subscriptions
-		WHERE status = 'cancelled' AND cancelled_at >= $1 AND cancelled_at <= $2 AND plan_name != 'free'
-	`, from, to)
+		WHERE status = 'cancelled' AND cancelled_at >= ? AND cancelled_at <= ? AND plan_name != 'free'
+	`, from, to).Scan(&churned)
 
 	if startCount == 0 {
 		return 0, nil
@@ -585,15 +521,13 @@ func (r *PostgresRepository) GetChurnRate(ctx context.Context, from, to time.Tim
 
 // GetRevenueTimeSeries returns revenue over time
 func (r *PostgresRepository) GetRevenueTimeSeries(ctx context.Context, from, to time.Time) (*domain.TimeSeries, error) {
-	query := `
+	rows, err := r.db.WithContext(ctx).Raw(`
 		SELECT date_trunc('day', created_at) as ts, SUM(amount) as value
 		FROM payments
-		WHERE created_at >= $1 AND created_at <= $2 AND status = 'succeeded'
+		WHERE created_at >= ? AND created_at <= ? AND status = 'succeeded'
 		GROUP BY ts
 		ORDER BY ts
-	`
-
-	rows, err := r.db.QueryxContext(ctx, query, from, to)
+	`, from, to).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -611,14 +545,12 @@ func (r *PostgresRepository) GetRevenueTimeSeries(ctx context.Context, from, to 
 
 // GetPlatformBreakdown returns user count per platform
 func (r *PostgresRepository) GetPlatformBreakdown(ctx context.Context) (map[string]int64, error) {
-	query := `
+	rows, err := r.db.WithContext(ctx).Raw(`
 		SELECT platform, COUNT(DISTINCT user_id) as count
 		FROM platform_connections
 		WHERE status = 'active'
 		GROUP BY platform
-	`
-
-	rows, err := r.db.QueryxContext(ctx, query)
+	`).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -637,16 +569,14 @@ func (r *PostgresRepository) GetPlatformBreakdown(ctx context.Context) (map[stri
 
 // GetFeatureUsage returns feature usage counts
 func (r *PostgresRepository) GetFeatureUsage(ctx context.Context, from, to time.Time) (map[string]int64, error) {
-	query := `
+	rows, err := r.db.WithContext(ctx).Raw(`
 		SELECT event_type, COUNT(*) as count
 		FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp <= $2
+		WHERE timestamp >= ? AND timestamp <= ?
 		AND event_type IN ('dashboard_viewed', 'campaign_viewed', 'campaign_exported',
 						   'report_generated', 'analytics_viewed', 'settings_updated')
 		GROUP BY event_type
-	`
-
-	rows, err := r.db.QueryxContext(ctx, query, from, to)
+	`, from, to).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -665,15 +595,13 @@ func (r *PostgresRepository) GetFeatureUsage(ctx context.Context, from, to time.
 
 // GetFeatureUsageTimeSeries returns feature usage over time
 func (r *PostgresRepository) GetFeatureUsageTimeSeries(ctx context.Context, feature string, from, to time.Time) (*domain.TimeSeries, error) {
-	query := `
+	rows, err := r.db.WithContext(ctx).Raw(`
 		SELECT date_trunc('day', timestamp) as ts, COUNT(*) as value
 		FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp <= $2 AND event_type = $3
+		WHERE timestamp >= ? AND timestamp <= ? AND event_type = ?
 		GROUP BY ts
 		ORDER BY ts
-	`
-
-	rows, err := r.db.QueryxContext(ctx, query, from, to, feature)
+	`, from, to, feature).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -691,16 +619,14 @@ func (r *PostgresRepository) GetFeatureUsageTimeSeries(ctx context.Context, feat
 
 // GetTopUsers returns top users by a metric
 func (r *PostgresRepository) GetTopUsers(ctx context.Context, metric string, limit int) ([]*domain.UserProfile, error) {
-	query := `
+	rows, err := r.db.WithContext(ctx).Raw(`
 		SELECT u.id, u.email, u.name, u.created_at,
 			   COALESCE(ap.total_events, 0) as total_events
 		FROM users u
 		LEFT JOIN analytics_profiles ap ON u.id = ap.user_id
 		ORDER BY ap.total_events DESC NULLS LAST
-		LIMIT $1
-	`
-
-	rows, err := r.db.QueryxContext(ctx, query, limit)
+		LIMIT ?
+	`, limit).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +644,7 @@ func (r *PostgresRepository) GetTopUsers(ctx context.Context, metric string, lim
 
 // GetChurnedUsers returns users who haven't logged in for N days
 func (r *PostgresRepository) GetChurnedUsers(ctx context.Context, days int) ([]*domain.UserProfile, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT u.id, u.email, u.name, u.created_at,
 			   ap.last_seen_at
 		FROM users u
@@ -726,9 +652,9 @@ func (r *PostgresRepository) GetChurnedUsers(ctx context.Context, days int) ([]*
 		WHERE ap.last_seen_at < NOW() - INTERVAL '%d days'
 		   OR (ap.last_seen_at IS NULL AND u.created_at < NOW() - INTERVAL '%d days')
 		ORDER BY COALESCE(ap.last_seen_at, u.created_at) ASC
-	`
+	`, days, days)
 
-	rows, err := r.db.QueryxContext(ctx, fmt.Sprintf(query, days, days))
+	rows, err := r.db.WithContext(ctx).Raw(query).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -750,14 +676,12 @@ func (r *PostgresRepository) GetChurnedUsers(ctx context.Context, days int) ([]*
 
 // GetEventsByType returns event counts by type
 func (r *PostgresRepository) GetEventsByType(ctx context.Context, from, to time.Time) (map[domain.EventType]int64, error) {
-	query := `
+	rows, err := r.db.WithContext(ctx).Raw(`
 		SELECT event_type, COUNT(*) as count
 		FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp <= $2
+		WHERE timestamp >= ? AND timestamp <= ?
 		GROUP BY event_type
-	`
-
-	rows, err := r.db.QueryxContext(ctx, query, from, to)
+	`, from, to).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -776,15 +700,13 @@ func (r *PostgresRepository) GetEventsByType(ctx context.Context, from, to time.
 
 // GetEventsTimeSeries returns events over time for a specific type
 func (r *PostgresRepository) GetEventsTimeSeries(ctx context.Context, eventType domain.EventType, from, to time.Time) (*domain.TimeSeries, error) {
-	query := `
+	rows, err := r.db.WithContext(ctx).Raw(`
 		SELECT date_trunc('day', timestamp) as ts, COUNT(*) as value
 		FROM analytics_events
-		WHERE timestamp >= $1 AND timestamp <= $2 AND event_type = $3
+		WHERE timestamp >= ? AND timestamp <= ? AND event_type = ?
 		GROUP BY ts
 		ORDER BY ts
-	`
-
-	rows, err := r.db.QueryxContext(ctx, query, from, to, eventType)
+	`, from, to, eventType).Rows()
 	if err != nil {
 		return nil, err
 	}

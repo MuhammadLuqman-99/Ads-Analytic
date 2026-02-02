@@ -171,11 +171,11 @@ func TestMultiTenantIsolation_CampaignFilters(t *testing.T) {
 
 	// Mock campaign data
 	campaignsA := []entity.Campaign{
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, OrganizationID: orgA, Name: "Org A Campaign 1"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, OrganizationID: orgA, Name: "Org A Campaign 2"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, OrganizationID: orgA, PlatformCampaignName: "Org A Campaign 1"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, OrganizationID: orgA, PlatformCampaignName: "Org A Campaign 2"},
 	}
 	campaignsB := []entity.Campaign{
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, OrganizationID: orgB, Name: "Org B Campaign 1"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, OrganizationID: orgB, PlatformCampaignName: "Org B Campaign 1"},
 	}
 
 	router := gin.New()
@@ -387,10 +387,10 @@ func TestDashboardAggregation_DateRangeFilter(t *testing.T) {
 
 func TestCampaignFilters_PlatformFilter(t *testing.T) {
 	campaigns := []entity.Campaign{
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformMeta, Name: "Meta Campaign"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformTikTok, Name: "TikTok Campaign"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformShopee, Name: "Shopee Campaign"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformMeta, Name: "Meta Campaign 2"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformMeta, PlatformCampaignName: "Meta Campaign"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformTikTok, PlatformCampaignName: "TikTok Campaign"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformShopee, PlatformCampaignName: "Shopee Campaign"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Platform: entity.PlatformMeta, PlatformCampaignName: "Meta Campaign 2"},
 	}
 
 	t.Run("Filter by Meta platform", func(t *testing.T) {
@@ -422,10 +422,10 @@ func TestCampaignFilters_PlatformFilter(t *testing.T) {
 
 func TestCampaignFilters_StatusFilter(t *testing.T) {
 	campaigns := []entity.Campaign{
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusActive, Name: "Active 1"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusPaused, Name: "Paused 1"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusActive, Name: "Active 2"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusArchived, Name: "Archived 1"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusActive, PlatformCampaignName: "Active 1"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusPaused, PlatformCampaignName: "Paused 1"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusActive, PlatformCampaignName: "Active 2"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Status: entity.CampaignStatusArchived, PlatformCampaignName: "Archived 1"},
 	}
 
 	t.Run("Filter active campaigns", func(t *testing.T) {
@@ -457,17 +457,17 @@ func TestCampaignFilters_StatusFilter(t *testing.T) {
 
 func TestCampaignFilters_SearchQuery(t *testing.T) {
 	campaigns := []entity.Campaign{
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Name: "Summer Sale 2024"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Name: "Winter Promo"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Name: "Summer Collection"},
-		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, Name: "Brand Awareness"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, PlatformCampaignName: "Summer Sale 2024"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, PlatformCampaignName: "Winter Promo"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, PlatformCampaignName: "Summer Collection"},
+		{BaseEntity: entity.BaseEntity{ID: uuid.New()}, PlatformCampaignName: "Brand Awareness"},
 	}
 
 	t.Run("Search for 'Summer'", func(t *testing.T) {
 		query := "Summer"
 		var filtered []entity.Campaign
 		for _, c := range campaigns {
-			if contains(c.Name, query) {
+			if contains(c.PlatformCampaignName, query) {
 				filtered = append(filtered, c)
 			}
 		}
@@ -481,7 +481,7 @@ func TestCampaignFilters_SearchQuery(t *testing.T) {
 		query := "summer"
 		var filtered []entity.Campaign
 		for _, c := range campaigns {
-			if containsIgnoreCase(c.Name, query) {
+			if containsIgnoreCase(c.PlatformCampaignName, query) {
 				filtered = append(filtered, c)
 			}
 		}
