@@ -1,21 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
 import { BarChart3, LineChartIcon, PieChartIcon, Table2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,6 +14,11 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatNumber } from "@/lib/mock-data";
+import {
+  LineChart as LibLineChart,
+  BarChart as LibBarChart,
+  PieChart as LibPieChart,
+} from "@/components/lib";
 
 export type ChartType = "line" | "bar" | "pie" | "table";
 
@@ -90,126 +80,56 @@ export function ChartVisualization({
     switch (chartType) {
       case "line":
         return (
-          <ResponsiveContainer width="100%" height={350}>
-            <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-              <XAxis
-                dataKey="name"
-                stroke="#64748B"
-                fontSize={12}
-                tickLine={false}
-              />
-              <YAxis stroke="#64748B" fontSize={12} tickLine={false} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #E2E8F0",
-                  borderRadius: "8px",
-                  boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                }}
-              />
-              <Legend />
-              {metrics.map((metric, index) => (
-                <Line
-                  key={metric}
-                  type="monotone"
-                  dataKey={metric}
-                  stroke={colors[index % colors.length]}
-                  strokeWidth={2}
-                  dot={{ fill: colors[index % colors.length], strokeWidth: 2 }}
-                  activeDot={{ r: 6 }}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+          <LibLineChart
+            data={data}
+            xAxisKey="name"
+            series={metrics.map((metric, index) => ({
+              key: metric,
+              name: metric.charAt(0).toUpperCase() + metric.slice(1),
+              color: colors[index % colors.length],
+            }))}
+            height={350}
+          />
         );
 
       case "bar":
         return (
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-              <XAxis
-                dataKey="name"
-                stroke="#64748B"
-                fontSize={12}
-                tickLine={false}
-              />
-              <YAxis stroke="#64748B" fontSize={12} tickLine={false} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #E2E8F0",
-                  borderRadius: "8px",
-                  boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                }}
-              />
-              <Legend />
-              {metrics.map((metric, index) => (
-                <Bar
-                  key={metric}
-                  dataKey={metric}
-                  fill={colors[index % colors.length]}
-                  radius={[4, 4, 0, 0]}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
+          <LibBarChart
+            data={data}
+            xAxisKey="name"
+            series={metrics.map((metric, index) => ({
+              key: metric,
+              name: metric.charAt(0).toUpperCase() + metric.slice(1),
+              color: colors[index % colors.length],
+            }))}
+            height={350}
+          />
         );
 
       case "pie":
-        // For pie chart, we need to restructure data - always include fill
-        const pieData = metrics.flatMap((metric, mIndex) =>
-          data.map((d, dIndex) => ({
-            name: `${d.name} - ${metric}`,
-            value: d[metric] as number,
-            fill: colors[(mIndex * data.length + dIndex) % colors.length],
-          }))
-        );
-
-        // If single metric, show by category
+        // For pie chart, we need to restructure data
         const simplePieData =
           metrics.length === 1
             ? data.map((d, i) => ({
                 name: d.name,
                 value: d[metrics[0]] as number,
-                fill: colors[i % colors.length],
+                color: colors[i % colors.length],
               }))
-            : pieData;
+            : metrics.flatMap((metric, mIndex) =>
+                data.map((d, dIndex) => ({
+                  name: `${d.name} - ${metric}`,
+                  value: d[metric] as number,
+                  color: colors[(mIndex * data.length + dIndex) % colors.length],
+                }))
+              );
 
         return (
-          <ResponsiveContainer width="100%" height={350}>
-            <PieChart>
-              <Pie
-                data={simplePieData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) =>
-                  `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`
-                }
-                outerRadius={120}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {simplePieData.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={entry.fill}
-                  />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #E2E8F0",
-                  borderRadius: "8px",
-                  boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                }}
-              />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          <LibPieChart
+            data={simplePieData}
+            height={350}
+            showLabels
+            colors={colors}
+          />
         );
 
       case "table":

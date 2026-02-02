@@ -28,15 +28,17 @@ export interface CalendarSingleProps {
     onSelect?: (date: Date) => void
     className?: string
     numberOfMonths?: number
+    disabled?: { after?: Date; before?: Date }
 }
 
 // Range date selection props
 export interface CalendarRangeProps {
     mode: "range"
-    selected?: { from: Date; to: Date } | undefined
+    selected?: { from?: Date; to?: Date } | undefined
     onSelect?: (range: { from?: Date; to?: Date } | undefined) => void
     className?: string
     numberOfMonths?: number
+    disabled?: { after?: Date; before?: Date }
 }
 
 export type CalendarProps = CalendarSingleProps | CalendarRangeProps
@@ -46,7 +48,14 @@ function isRangeMode(props: CalendarProps): props is CalendarRangeProps {
 }
 
 export function Calendar(props: CalendarProps) {
-    const { className, numberOfMonths = 1 } = props
+    const { className, numberOfMonths = 1, disabled } = props
+
+    const isDateDisabled = (day: Date): boolean => {
+        if (!disabled) return false
+        if (disabled.after && isAfter(day, disabled.after)) return true
+        if (disabled.before && isBefore(day, disabled.before)) return true
+        return false
+    }
 
     const getInitialMonth = () => {
         if (isRangeMode(props)) {
@@ -61,6 +70,8 @@ export function Calendar(props: CalendarProps) {
     const weekDays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
     const handleDayClick = (day: Date) => {
+        if (isDateDisabled(day)) return
+
         if (isRangeMode(props)) {
             if (!rangeStart) {
                 setRangeStart(day)
@@ -136,11 +147,13 @@ export function Calendar(props: CalendarProps) {
                         const isEnd = isRangeEnd(day)
                         const isCurrentMonth = isSameMonth(day, month)
                         const isToday = isSameDay(day, new Date())
+                        const isDisabled = isDateDisabled(day)
 
                         return (
                             <button
                                 key={idx}
                                 onClick={() => handleDayClick(day)}
+                                disabled={isDisabled}
                                 className={cn(
                                     "h-8 w-8 rounded-md text-sm transition-colors",
                                     "hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -151,7 +164,8 @@ export function Calendar(props: CalendarProps) {
                                     inRange && !selected && "bg-blue-100",
                                     isStart && "rounded-r-none",
                                     isEnd && "rounded-l-none",
-                                    inRange && !isStart && !isEnd && "rounded-none"
+                                    inRange && !isStart && !isEnd && "rounded-none",
+                                    isDisabled && "opacity-50 cursor-not-allowed hover:bg-transparent"
                                 )}
                             >
                                 {format(day, 'd')}

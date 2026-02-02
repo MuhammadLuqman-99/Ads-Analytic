@@ -1,20 +1,5 @@
 "use client";
 
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +18,11 @@ import {
   getPlatformName,
   type Platform,
 } from "@/lib/mock-data";
+import {
+  BarChart as LibBarChart,
+  LineChart as LibLineChart,
+  DonutChart,
+} from "@/components/lib";
 
 const PLATFORM_COLORS: Record<Platform, string> = {
   meta: "#3B82F6",
@@ -75,6 +65,7 @@ export function PlatformComparisonReport({ data }: { data: PlatformData[] }) {
     Conversions: d.conversions,
     ROAS: d.roas,
     platform: d.platform,
+    color: PLATFORM_COLORS[d.platform],
   }));
 
   return (
@@ -86,22 +77,16 @@ export function PlatformComparisonReport({ data }: { data: PlatformData[] }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div>
             <h4 className="text-sm font-medium text-slate-700 mb-4">Spend by Platform</h4>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="name" stroke="#64748B" fontSize={12} />
-                <YAxis stroke="#64748B" fontSize={12} />
-                <Tooltip
-                  formatter={(value) => formatCurrency(Number(value) || 0)}
-                  contentStyle={{ backgroundColor: "white", border: "1px solid #E2E8F0", borderRadius: "8px" }}
-                />
-                <Bar dataKey="Spend" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={PLATFORM_COLORS[entry.platform]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <LibBarChart
+              data={chartData as unknown as Record<string, unknown>[]}
+              xAxisKey="name"
+              series={[{ key: "Spend", name: "Spend", color: "#3B82F6" }]}
+              height={250}
+              showLegend={false}
+              colorByData
+              colors={data.map((d) => PLATFORM_COLORS[d.platform])}
+              tooltipFormatter={(value) => formatCurrency(value)}
+            />
           </div>
           <div>
             <h4 className="text-sm font-medium text-slate-700 mb-4">Key Metrics</h4>
@@ -143,18 +128,16 @@ export function DailyPerformanceReport({ data }: { data: DailyData[] }) {
         <CardTitle className="text-slate-900">Daily Performance Trend</CardTitle>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-            <XAxis dataKey="date" stroke="#64748B" fontSize={12} />
-            <YAxis yAxisId="left" stroke="#3B82F6" fontSize={12} />
-            <YAxis yAxisId="right" orientation="right" stroke="#10B981" fontSize={12} />
-            <Tooltip contentStyle={{ backgroundColor: "white", border: "1px solid #E2E8F0", borderRadius: "8px" }} />
-            <Legend />
-            <Line yAxisId="left" type="monotone" dataKey="spend" name="Spend" stroke="#3B82F6" strokeWidth={2} dot={false} />
-            <Line yAxisId="right" type="monotone" dataKey="conversions" name="Conversions" stroke="#10B981" strokeWidth={2} dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
+        <LibLineChart
+          data={data as unknown as Record<string, unknown>[]}
+          xAxisKey="date"
+          series={[
+            { key: "spend", name: "Spend", color: "#3B82F6" },
+            { key: "conversions", name: "Conversions", color: "#10B981" },
+          ]}
+          height={300}
+          showDots={false}
+        />
       </CardContent>
     </Card>
   );
@@ -228,7 +211,7 @@ export function SpendDistributionReport({ data }: { data: PlatformData[] }) {
   const pieData = data.map((d) => ({
     name: getPlatformName(d.platform),
     value: d.spend,
-    platform: d.platform,
+    color: PLATFORM_COLORS[d.platform],
   }));
   const total = pieData.reduce((sum, d) => sum + d.value, 0);
 
@@ -239,29 +222,26 @@ export function SpendDistributionReport({ data }: { data: PlatformData[] }) {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={2} dataKey="value">
-                {pieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={PLATFORM_COLORS[entry.platform]} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value) => [formatCurrency(Number(value) || 0), "Spend"]} contentStyle={{ backgroundColor: "white", border: "1px solid #E2E8F0", borderRadius: "8px" }} />
-            </PieChart>
-          </ResponsiveContainer>
+          <DonutChart
+            data={pieData}
+            height={250}
+            showLegend={false}
+            centerLabel={{ value: formatCurrency(total), label: "Total Spend" }}
+            valueFormatter={(v) => formatCurrency(v)}
+          />
           <div className="space-y-4">
             {pieData.map((item) => {
               const percentage = ((item.value / total) * 100).toFixed(1);
               return (
-                <div key={item.platform} className="flex items-center gap-4">
-                  <div className="w-4 h-4 rounded" style={{ backgroundColor: PLATFORM_COLORS[item.platform] }} />
+                <div key={item.name} className="flex items-center gap-4">
+                  <div className="w-4 h-4 rounded" style={{ backgroundColor: item.color }} />
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-slate-900">{item.name}</span>
                       <span className="text-sm text-slate-500">{percentage}%</span>
                     </div>
                     <div className="mt-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${percentage}%`, backgroundColor: PLATFORM_COLORS[item.platform] }} />
+                      <div className="h-full rounded-full" style={{ width: `${percentage}%`, backgroundColor: item.color }} />
                     </div>
                     <p className="text-xs text-slate-500 mt-1">{formatCurrency(item.value)}</p>
                   </div>
