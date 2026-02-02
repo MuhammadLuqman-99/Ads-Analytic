@@ -1,0 +1,3 @@
+# This directory contains SSL certificates
+# Generate self-signed certs: make ssl-dev
+# Generate Let's Encrypt certs: make ssl-init

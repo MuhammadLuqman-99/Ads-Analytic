@@ -2,13 +2,15 @@
 # Ads Analytics Platform - Makefile
 # =============================================================================
 
-.PHONY: help build run test clean docker-build docker-up docker-down docker-logs
+.PHONY: help build run test clean docker-build docker-up docker-down docker-logs \
+        dev deploy logs migrate ssl-init ssl-renew
 
 # Variables
 APP_NAME := ads-aggregator
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DOMAIN := $(shell grep DOMAIN .env 2>/dev/null | cut -d '=' -f2 || echo "localhost")
 
 # Go settings
 GOFLAGS := -ldflags "-w -s -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
@@ -163,10 +165,145 @@ frontend-install:
 	cd frontend && npm install
 
 # =============================================================================
-# All-in-one
+# All-in-one (Primary Commands)
 # =============================================================================
-dev: docker-dev
 
-prod: docker-build docker-up
+## Run locally in development mode
+dev:
+	@echo "Starting development environment..."
+	$(DOCKER_COMPOSE_DEV) up --build
 
+## Build all docker images for production
+build: docker-build
+	@echo "Build complete!"
+
+## Deploy to production (docker-compose up -d)
+deploy:
+	@echo "Deploying production stack..."
+	$(DOCKER_COMPOSE_PROD) up -d
+	@echo "Deployment complete! Waiting for health checks..."
+	@sleep 10
+	$(DOCKER_COMPOSE_PROD) ps
+
+## Tail all service logs
+logs:
+	$(DOCKER_COMPOSE_PROD) logs -f --tail=100
+
+## Run database migrations
+migrate:
+	@echo "Running database migrations..."
+	$(DOCKER_COMPOSE_PROD) exec api /app/api migrate up
+	@echo "Migrations complete!"
+
+## Run all tests
 all: deps build test
+
+# =============================================================================
+# SSL / Let's Encrypt
+# =============================================================================
+
+## Initialize SSL certificates with Let's Encrypt (first time setup)
+ssl-init:
+	@echo "Initializing SSL certificates for $(DOMAIN)..."
+	@mkdir -p certbot/conf certbot/www
+	@docker run -it --rm \
+		-v "$(PWD)/certbot/conf:/etc/letsencrypt" \
+		-v "$(PWD)/certbot/www:/var/www/certbot" \
+		certbot/certbot certonly \
+		--webroot \
+		--webroot-path=/var/www/certbot \
+		--email admin@$(DOMAIN) \
+		--agree-tos \
+		--no-eff-email \
+		-d $(DOMAIN) \
+		-d www.$(DOMAIN)
+	@echo "SSL certificates generated!"
+	@echo "Copying certificates to nginx ssl directory..."
+	@mkdir -p deploy/nginx/ssl
+	@cp certbot/conf/live/$(DOMAIN)/fullchain.pem deploy/nginx/ssl/
+	@cp certbot/conf/live/$(DOMAIN)/privkey.pem deploy/nginx/ssl/
+	@cp certbot/conf/live/$(DOMAIN)/chain.pem deploy/nginx/ssl/
+	@echo "Done! Restart nginx: make docker-restart"
+
+## Renew SSL certificates
+ssl-renew:
+	@echo "Renewing SSL certificates..."
+	$(DOCKER_COMPOSE_PROD) run --rm certbot renew
+	@echo "Certificates renewed. Reloading nginx..."
+	$(DOCKER_COMPOSE_PROD) exec nginx nginx -s reload
+
+## Generate self-signed SSL for development
+ssl-dev:
+	@echo "Generating self-signed SSL certificates for development..."
+	@mkdir -p deploy/nginx/ssl
+	@openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+		-keyout deploy/nginx/ssl/privkey.pem \
+		-out deploy/nginx/ssl/fullchain.pem \
+		-subj "/CN=localhost/O=Ads Analytics/C=US"
+	@cp deploy/nginx/ssl/fullchain.pem deploy/nginx/ssl/chain.pem
+	@echo "Self-signed certificates generated!"
+
+# =============================================================================
+# Shortcuts
+# =============================================================================
+
+## Quick status check
+status:
+	$(DOCKER_COMPOSE_PROD) ps
+	@echo ""
+	@echo "Service Health:"
+	@curl -s http://localhost/health 2>/dev/null || echo "Nginx: DOWN"
+	@curl -s http://localhost:8080/health 2>/dev/null || echo "API: DOWN"
+
+## Stop all services
+stop:
+	$(DOCKER_COMPOSE_PROD) down
+
+## Restart all services
+restart:
+	$(DOCKER_COMPOSE_PROD) restart
+
+## View specific service logs
+logs-api:
+	$(DOCKER_COMPOSE_PROD) logs -f api
+
+logs-frontend:
+	$(DOCKER_COMPOSE_PROD) logs -f frontend
+
+logs-nginx:
+	$(DOCKER_COMPOSE_PROD) logs -f nginx
+
+logs-worker:
+	$(DOCKER_COMPOSE_PROD) logs -f worker
+
+## Shell into containers
+shell-api:
+	$(DOCKER_COMPOSE_PROD) exec api sh
+
+shell-postgres:
+	$(DOCKER_COMPOSE_PROD) exec postgres psql -U $${DB_USER:-postgres} -d $${DB_NAME:-ads_aggregator}
+
+shell-redis:
+	$(DOCKER_COMPOSE_PROD) exec redis redis-cli
+
+## Database backup
+db-backup:
+	@echo "Creating database backup..."
+	@mkdir -p backups
+	$(DOCKER_COMPOSE_PROD) exec postgres pg_dump -U $${DB_USER:-postgres} $${DB_NAME:-ads_aggregator} > backups/backup_$(shell date +%Y%m%d_%H%M%S).sql
+	@echo "Backup created: backups/backup_$(shell date +%Y%m%d_%H%M%S).sql"
+
+## Database restore
+db-restore:
+	@echo "Restoring database from $(file)..."
+	@test -n "$(file)" || (echo "Usage: make db-restore file=backups/backup.sql" && exit 1)
+	$(DOCKER_COMPOSE_PROD) exec -T postgres psql -U $${DB_USER:-postgres} $${DB_NAME:-ads_aggregator} < $(file)
+	@echo "Database restored!"
+
+## Full cleanup (WARNING: removes all data)
+nuke:
+	@echo "WARNING: This will remove all containers, volumes, and images!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ]
+	$(DOCKER_COMPOSE_PROD) down -v --rmi all
+	docker system prune -af
+	@echo "Cleanup complete!"

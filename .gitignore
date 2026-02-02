@@ -39,3 +39,15 @@ tmpclaude-*
 
 # Claude settings
 .claude/
+
+# SSL Certificates (never commit!)
+deploy/nginx/ssl/*.pem
+certbot/conf/
+certbot/www/
+
+# Docker volumes
+postgres-data/
+redis-data/
+
+# Backups
+backups/
