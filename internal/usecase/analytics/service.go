@@ -435,6 +435,107 @@ func (s *Service) GenerateReport(ctx context.Context, orgID uuid.UUID, dateRange
 	}, nil
 }
 
+// ExportAnalytics exports analytics data in the specified format (csv or xlsx)
+func (s *Service) ExportAnalytics(ctx context.Context, orgID uuid.UUID, dateRange entity.DateRange, format string) ([]byte, error) {
+	// Generate the report data first
+	report, err := s.GenerateReport(ctx, orgID, dateRange)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate report: %w", err)
+	}
+
+	switch format {
+	case "xlsx":
+		return s.exportToExcel(report)
+	default:
+		return s.exportToCSV(report)
+	}
+}
+
+// exportToCSV converts the report to CSV format
+func (s *Service) exportToCSV(report *ReportExport) ([]byte, error) {
+	var result []byte
+
+	// Header
+	header := "Campaign ID,Campaign Name,Platform,Status,Spend,Impressions,Clicks,CTR,CPC,Conversions,Revenue,ROAS\n"
+	result = append(result, []byte(header)...)
+
+	// Data rows
+	for _, c := range report.CampaignMetrics {
+		row := fmt.Sprintf("%s,%s,%s,%s,%s,%d,%d,%.2f,%s,%d,%s,%.2f\n",
+			c.CampaignID.String(),
+			escapeCSV(c.CampaignName),
+			c.Platform,
+			c.Status,
+			c.Spend.StringFixed(2),
+			c.Impressions,
+			c.Clicks,
+			c.CTR,
+			c.CPC.StringFixed(2),
+			c.Conversions,
+			c.Revenue.StringFixed(2),
+			c.ROAS,
+		)
+		result = append(result, []byte(row)...)
+	}
+
+	return result, nil
+}
+
+// exportToExcel converts the report to Excel format (simplified - returns CSV with xlsx extension for now)
+func (s *Service) exportToExcel(report *ReportExport) ([]byte, error) {
+	// For a production system, use excelize library
+	// For now, return CSV format that Excel can open
+	return s.exportToCSV(report)
+}
+
+// escapeCSV escapes special characters in CSV fields
+func escapeCSV(s string) string {
+	// If the string contains comma, newline, or quote, wrap in quotes and escape quotes
+	needsQuotes := false
+	for _, c := range s {
+		if c == ',' || c == '\n' || c == '"' {
+			needsQuotes = true
+			break
+		}
+	}
+	if needsQuotes {
+		escaped := ""
+		for _, c := range s {
+			if c == '"' {
+				escaped += "\"\""
+			} else {
+				escaped += string(c)
+			}
+		}
+		return "\"" + escaped + "\""
+	}
+	return s
+}
+
+// GetTimeSeriesMetrics returns time series metrics for charting
+func (s *Service) GetTimeSeriesMetrics(ctx context.Context, orgID uuid.UUID, dateRange entity.DateRange, platform string, granularity string) ([]entity.DailyMetricsTrend, error) {
+	filter := entity.MetricsFilter{
+		OrganizationID: orgID,
+		DateRange:      dateRange,
+		GroupBy:        granularity,
+	}
+
+	// Filter by platform if specified
+	if platform != "" {
+		p := entity.Platform(platform)
+		if p.IsValid() {
+			filter.Platforms = []entity.Platform{p}
+		}
+	}
+
+	return s.metricsRepo.GetDailyTrend(ctx, filter)
+}
+
+// GetTopCampaigns returns top performing campaigns
+func (s *Service) GetTopCampaigns(ctx context.Context, orgID uuid.UUID, dateRange entity.DateRange, limit int) ([]entity.TopPerformer, error) {
+	return s.metricsRepo.GetTopPerformingCampaigns(ctx, orgID, dateRange, limit)
+}
+
 // Helper to format numbers
 func formatNumber(n int64) string {
 	return fmt.Sprintf("%d", n)

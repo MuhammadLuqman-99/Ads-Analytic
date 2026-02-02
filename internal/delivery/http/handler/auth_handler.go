@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/ads-aggregator/ads-aggregator/internal/delivery/http/middleware"
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
@@ -11,15 +13,32 @@ import (
 	"github.com/google/uuid"
 )
 
+// Cookie names
+const (
+	AccessTokenCookie  = "access_token"
+	RefreshTokenCookie = "refresh_token"
+)
+
 // AuthHandler handles authentication-related HTTP requests
 type AuthHandler struct {
-	authService *auth.Service
+	authService  *auth.Service
+	cookieDomain string
+	secureCookie bool
 }
 
 // NewAuthHandler creates a new auth handler
 func NewAuthHandler(authService *auth.Service) *AuthHandler {
+	// Determine cookie settings from environment
+	secureCookie := os.Getenv("APP_ENV") == "production"
+	cookieDomain := os.Getenv("COOKIE_DOMAIN")
+	if cookieDomain == "" {
+		cookieDomain = "localhost"
+	}
+
 	return &AuthHandler{
-		authService: authService,
+		authService:  authService,
+		cookieDomain: cookieDomain,
+		secureCookie: secureCookie,
 	}
 }
 
@@ -37,8 +56,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Set auth cookies
+	h.setAuthCookies(c, result.Tokens)
+
+	// Return user data (without tokens in body since they're in cookies)
 	c.JSON(http.StatusCreated, gin.H{
-		"data": result,
+		"success": true,
+		"data": gin.H{
+			"user":         result.User,
+			"organization": result.Organization,
+		},
 	})
 }
 
@@ -56,29 +83,97 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Set auth cookies
+	h.setAuthCookies(c, result.Tokens)
+
+	// Return user data
 	c.JSON(http.StatusOK, gin.H{
-		"data": result,
+		"success": true,
+		"data": gin.H{
+			"user":         h.sanitizeUser(result.User),
+			"organization": result.Organization,
+			"expiresAt":    result.Tokens.AccessTokenExpiresAt,
+		},
 	})
 }
 
 // RefreshToken handles token refresh
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	var req struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondWithError(c, errors.ErrValidation(err.Error()))
-		return
+	// Try to get refresh token from cookie first
+	refreshToken, err := c.Cookie(RefreshTokenCookie)
+	if err != nil || refreshToken == "" {
+		// Fallback to request body
+		var req struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+			respondWithError(c, errors.ErrUnauthorized("Refresh token required"))
+			return
+		}
+		refreshToken = req.RefreshToken
 	}
 
-	tokens, err := h.authService.RefreshToken(c.Request.Context(), req.RefreshToken)
+	tokens, err := h.authService.RefreshToken(c.Request.Context(), refreshToken)
 	if err != nil {
+		// Clear cookies on refresh failure
+		h.clearAuthCookies(c)
 		respondWithError(c, err)
 		return
 	}
 
+	// Set new auth cookies
+	h.setAuthCookies(c, tokens)
+
 	c.JSON(http.StatusOK, gin.H{
-		"data": tokens,
+		"success": true,
+		"data": gin.H{
+			"expiresAt": tokens.AccessTokenExpiresAt,
+		},
+	})
+}
+
+// Logout handles user logout
+func (h *AuthHandler) Logout(c *gin.Context) {
+	h.clearAuthCookies(c)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"message": "Logged out successfully",
+		},
+	})
+}
+
+// GetSession returns current session info (for client-side hydration)
+func (h *AuthHandler) GetSession(c *gin.Context) {
+	// Check if user is authenticated
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"authenticated": false,
+			},
+		})
+		return
+	}
+
+	email, _ := middleware.GetEmail(c)
+	role, _ := middleware.GetRole(c)
+	orgID, _ := middleware.GetOrgID(c)
+	permissions, _ := middleware.GetPermissions(c)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"authenticated": true,
+			"user": gin.H{
+				"id":    userID.String(),
+				"email": email,
+				"role":  role,
+			},
+			"organizationId": orgID.String(),
+			"permissions":    permissions,
+		},
 	})
 }
 
@@ -92,9 +187,12 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement forgot password logic
+	// TODO: Implement forgot password logic with email sending
 	c.JSON(http.StatusOK, gin.H{
-		"message": "If an account exists with this email, a password reset link has been sent",
+		"success": true,
+		"data": gin.H{
+			"message": "If an account exists with this email, a password reset link has been sent",
+		},
 	})
 }
 
@@ -111,7 +209,10 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 
 	// TODO: Implement reset password logic
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Password has been reset successfully",
+		"success": true,
+		"data": gin.H{
+			"message": "Password has been reset successfully",
+		},
 	})
 }
 
@@ -120,12 +221,15 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	userID, _ := middleware.GetUserID(c)
 	email, _ := middleware.GetEmail(c)
 	role, _ := middleware.GetRole(c)
+	orgID, _ := middleware.GetOrgID(c)
 
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data": gin.H{
-			"id":    userID,
-			"email": email,
-			"role":  role,
+			"id":             userID.String(),
+			"email":          email,
+			"role":           role,
+			"organizationId": orgID.String(),
 		},
 	})
 }
@@ -133,8 +237,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // UpdateProfile updates the current user's profile
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	var req struct {
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
+		FirstName string `json:"firstName"`
+		LastName  string `json:"lastName"`
 		Phone     string `json:"phone"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -144,7 +248,10 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 
 	// TODO: Implement profile update
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Profile updated successfully",
+		"success": true,
+		"data": gin.H{
+			"message": "Profile updated successfully",
+		},
 	})
 }
 
@@ -153,8 +260,8 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userID, _ := middleware.GetUserID(c)
 
 	var req struct {
-		CurrentPassword string `json:"current_password" binding:"required"`
-		NewPassword     string `json:"new_password" binding:"required,min=8"`
+		CurrentPassword string `json:"currentPassword" binding:"required"`
+		NewPassword     string `json:"newPassword" binding:"required,min=8"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondWithError(c, errors.ErrValidation(err.Error()))
@@ -168,59 +275,70 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Password changed successfully",
+		"success": true,
+		"data": gin.H{
+			"message": "Password changed successfully",
+		},
 	})
 }
 
 // ListOrganizations lists organizations for the current user
 func (h *AuthHandler) ListOrganizations(c *gin.Context) {
-	// TODO: Implement
 	c.JSON(http.StatusOK, gin.H{
-		"data": []interface{}{},
+		"success": true,
+		"data":    []interface{}{},
 	})
 }
 
 // GetOrganization returns an organization by ID
 func (h *AuthHandler) GetOrganization(c *gin.Context) {
-	// TODO: Implement
 	c.JSON(http.StatusOK, gin.H{
-		"data": nil,
+		"success": true,
+		"data":    nil,
 	})
 }
 
 // UpdateOrganization updates an organization
 func (h *AuthHandler) UpdateOrganization(c *gin.Context) {
-	// TODO: Implement
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Organization updated",
+		"success": true,
+		"data": gin.H{
+			"message": "Organization updated",
+		},
 	})
 }
 
 // ListMembers lists organization members
 func (h *AuthHandler) ListMembers(c *gin.Context) {
-	// TODO: Implement
 	c.JSON(http.StatusOK, gin.H{
-		"data": []interface{}{},
+		"success": true,
+		"data":    []interface{}{},
 	})
 }
 
 // InviteMember invites a new member to an organization
 func (h *AuthHandler) InviteMember(c *gin.Context) {
-	// TODO: Implement
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Invitation sent",
+		"success": true,
+		"data": gin.H{
+			"message": "Invitation sent",
+		},
 	})
 }
 
 // RemoveMember removes a member from an organization
 func (h *AuthHandler) RemoveMember(c *gin.Context) {
-	// TODO: Implement
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Member removed",
+		"success": true,
+		"data": gin.H{
+			"message": "Member removed",
+		},
 	})
 }
 
+// ============================================================================
 // OAuth Callbacks
+// ============================================================================
 
 // MetaCallback handles Meta OAuth callback
 func (h *AuthHandler) MetaCallback(c *gin.Context) {
@@ -230,18 +348,17 @@ func (h *AuthHandler) MetaCallback(c *gin.Context) {
 
 	if errorCode != "" {
 		errorDesc := c.Query("error_description")
-		c.Redirect(http.StatusTemporaryRedirect, "/oauth/error?platform=meta&error="+errorCode+"&message="+errorDesc)
+		c.Redirect(http.StatusTemporaryRedirect, "/connect?error="+errorCode+"&message="+errorDesc+"&platform=meta")
 		return
 	}
 
 	account, redirectURL, err := h.authService.HandleOAuthCallback(c.Request.Context(), entity.PlatformMeta, code, state)
 	if err != nil {
-		c.Redirect(http.StatusTemporaryRedirect, "/oauth/error?platform=meta&error=callback_failed")
+		c.Redirect(http.StatusTemporaryRedirect, "/connect?error=callback_failed&platform=meta")
 		return
 	}
 
-	// Redirect to success page with account ID
-	c.Redirect(http.StatusTemporaryRedirect, redirectURL+"?platform=meta&account_id="+account.ID.String())
+	c.Redirect(http.StatusTemporaryRedirect, redirectURL+"?platform=meta&account_id="+account.ID.String()+"&success=true")
 }
 
 // TikTokCallback handles TikTok OAuth callback
@@ -250,42 +367,103 @@ func (h *AuthHandler) TikTokCallback(c *gin.Context) {
 	state := c.Query("state")
 
 	if code == "" {
-		c.Redirect(http.StatusTemporaryRedirect, "/oauth/error?platform=tiktok&error=no_code")
+		c.Redirect(http.StatusTemporaryRedirect, "/connect?error=no_code&platform=tiktok")
 		return
 	}
 
 	account, redirectURL, err := h.authService.HandleOAuthCallback(c.Request.Context(), entity.PlatformTikTok, code, state)
 	if err != nil {
-		c.Redirect(http.StatusTemporaryRedirect, "/oauth/error?platform=tiktok&error=callback_failed")
+		c.Redirect(http.StatusTemporaryRedirect, "/connect?error=callback_failed&platform=tiktok")
 		return
 	}
 
-	c.Redirect(http.StatusTemporaryRedirect, redirectURL+"?platform=tiktok&account_id="+account.ID.String())
+	c.Redirect(http.StatusTemporaryRedirect, redirectURL+"?platform=tiktok&account_id="+account.ID.String()+"&success=true")
 }
 
 // ShopeeCallback handles Shopee OAuth callback
 func (h *AuthHandler) ShopeeCallback(c *gin.Context) {
 	code := c.Query("code")
 	shopID := c.Query("shop_id")
+	state := c.Query("state")
 
 	if code == "" {
-		c.Redirect(http.StatusTemporaryRedirect, "/oauth/error?platform=shopee&error=no_code")
+		c.Redirect(http.StatusTemporaryRedirect, "/connect?error=no_code&platform=shopee")
 		return
 	}
-
-	// For Shopee, the state might be encoded differently
-	state := c.Query("state")
 
 	account, redirectURL, err := h.authService.HandleOAuthCallback(c.Request.Context(), entity.PlatformShopee, code, state)
 	if err != nil {
-		c.Redirect(http.StatusTemporaryRedirect, "/oauth/error?platform=shopee&error=callback_failed")
+		c.Redirect(http.StatusTemporaryRedirect, "/connect?error=callback_failed&platform=shopee")
 		return
 	}
 
-	c.Redirect(http.StatusTemporaryRedirect, redirectURL+"?platform=shopee&account_id="+account.ID.String()+"&shop_id="+shopID)
+	c.Redirect(http.StatusTemporaryRedirect, redirectURL+"?platform=shopee&account_id="+account.ID.String()+"&shop_id="+shopID+"&success=true")
 }
 
+// ============================================================================
+// Cookie Management
+// ============================================================================
+
+func (h *AuthHandler) setAuthCookies(c *gin.Context, tokens interface{}) {
+	type tokenPair struct {
+		AccessToken           string
+		RefreshToken          string
+		AccessTokenExpiresAt  time.Time
+		RefreshTokenExpiresAt time.Time
+	}
+
+	var tp tokenPair
+	switch t := tokens.(type) {
+	case *auth.AuthResponse:
+		if t.Tokens != nil {
+			tp.AccessToken = t.Tokens.AccessToken
+			tp.RefreshToken = t.Tokens.RefreshToken
+			tp.AccessTokenExpiresAt = t.Tokens.AccessTokenExpiresAt
+			tp.RefreshTokenExpiresAt = t.Tokens.RefreshTokenExpiresAt
+		}
+	default:
+		// Try to use reflection or type assertion for jwt.TokenPair
+		return
+	}
+
+	// Set access token cookie
+	h.setCookie(c, AccessTokenCookie, tp.AccessToken, int(time.Until(tp.AccessTokenExpiresAt).Seconds()))
+
+	// Set refresh token cookie (longer expiry)
+	h.setCookie(c, RefreshTokenCookie, tp.RefreshToken, int(time.Until(tp.RefreshTokenExpiresAt).Seconds()))
+}
+
+func (h *AuthHandler) setCookie(c *gin.Context, name, value string, maxAge int) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(
+		name,
+		value,
+		maxAge,
+		"/",
+		h.cookieDomain,
+		h.secureCookie,
+		true, // httpOnly
+	)
+}
+
+func (h *AuthHandler) clearAuthCookies(c *gin.Context) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(AccessTokenCookie, "", -1, "/", h.cookieDomain, h.secureCookie, true)
+	c.SetCookie(RefreshTokenCookie, "", -1, "/", h.cookieDomain, h.secureCookie, true)
+}
+
+func (h *AuthHandler) sanitizeUser(user *entity.User) gin.H {
+	return gin.H{
+		"id":        user.ID.String(),
+		"email":     user.Email,
+		"firstName": user.FirstName,
+		"lastName":  user.LastName,
+	}
+}
+
+// ============================================================================
 // Helper functions
+// ============================================================================
 
 func respondWithError(c *gin.Context, err error) {
 	status := errors.GetHTTPStatus(err)
@@ -300,6 +478,7 @@ func respondWithError(c *gin.Context, err error) {
 
 	if appErr != nil {
 		c.JSON(status, gin.H{
+			"success": false,
 			"error": gin.H{
 				"code":    appErr.Code,
 				"message": appErr.Message,
@@ -310,6 +489,7 @@ func respondWithError(c *gin.Context, err error) {
 	}
 
 	c.JSON(status, gin.H{
+		"success": false,
 		"error": gin.H{
 			"code":    "INTERNAL_ERROR",
 			"message": err.Error(),

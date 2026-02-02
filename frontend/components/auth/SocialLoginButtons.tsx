@@ -1,6 +1,5 @@
 "use client";
 
-import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
@@ -8,13 +7,32 @@ interface SocialLoginButtonsProps {
   callbackUrl?: string;
 }
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
+
 export function SocialLoginButtons({ callbackUrl = "/dashboard" }: SocialLoginButtonsProps) {
   const [isLoading, setIsLoading] = useState<string | null>(null);
 
   const handleSocialLogin = async (provider: string) => {
     setIsLoading(provider);
     try {
-      await signIn(provider, { callbackUrl });
+      // Get OAuth URL from backend
+      const response = await fetch(
+        `${API_BASE_URL}/connections/${provider}/connect?redirect_url=${encodeURIComponent(window.location.origin + callbackUrl)}`,
+        {
+          credentials: "include",
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data?.auth_url) {
+          // Redirect to OAuth provider
+          window.location.href = data.data.auth_url;
+          return;
+        }
+      }
+
+      console.error("Failed to get OAuth URL");
     } catch (error) {
       console.error("Social login error:", error);
     } finally {

@@ -1,20 +1,20 @@
 "use client";
 
 import { useEffect } from "react";
-import { useSession } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { MobileSidebar, BottomNavigation } from "./MobileNav";
 import { useSidebarStore, useOrganizationStore } from "@/stores/app-store";
+import { useAuthContext } from "@/components/providers/AuthProvider";
 
 interface AppShellProps {
   children: React.ReactNode;
 }
 
 export function AppShell({ children }: AppShellProps) {
-  const { data: session } = useSession();
+  const { user, isAuthenticated, isLoading } = useAuthContext();
   const { isCollapsed } = useSidebarStore();
   const { setOrganizations, setSelectedOrganization, selectedOrganization } =
     useOrganizationStore();
@@ -22,6 +22,9 @@ export function AppShell({ children }: AppShellProps) {
   // Initialize organization from session or fetch from API
   useEffect(() => {
     const initializeOrganization = async () => {
+      // Wait for auth to be ready
+      if (isLoading) return;
+
       // If we already have an organization selected, skip
       if (selectedOrganization) return;
 
@@ -46,7 +49,7 @@ export function AppShell({ children }: AppShellProps) {
         // Set a default organization for demo purposes
         const defaultOrg = {
           id: "demo-org",
-          name: session?.user?.name ? `${session.user.name}'s Org` : "My Organization",
+          name: user?.email ? `${user.email.split("@")[0]}'s Org` : "My Organization",
           plan: "free" as const,
         };
         setOrganizations([defaultOrg]);
@@ -55,7 +58,16 @@ export function AppShell({ children }: AppShellProps) {
     };
 
     initializeOrganization();
-  }, [session, selectedOrganization, setOrganizations, setSelectedOrganization]);
+  }, [isLoading, isAuthenticated, user, selectedOrganization, setOrganizations, setSelectedOrganization]);
+
+  // Show loading state while checking auth
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { signOut, useSession } from "next-auth/react";
 import { format } from "date-fns";
 import {
   Menu,
@@ -38,6 +37,7 @@ import {
   useNotificationStore,
   type DateRangePreset,
 } from "@/stores/app-store";
+import { useAuthContext } from "@/components/providers/AuthProvider";
 
 const datePresets: { label: string; value: DateRangePreset }[] = [
   { label: "Today", value: "today" },
@@ -51,7 +51,7 @@ const datePresets: { label: string; value: DateRangePreset }[] = [
 
 export function Header() {
   const router = useRouter();
-  const { data: session } = useSession();
+  const { user, logout } = useAuthContext();
   const { toggleMobileOpen } = useSidebarStore();
   const { organizations, selectedOrganization, setSelectedOrganization } =
     useOrganizationStore();
@@ -62,13 +62,15 @@ export function Header() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   const handleSignOut = async () => {
-    await signOut({ callbackUrl: "/login" });
+    await logout();
   };
 
-  const getInitials = (name?: string | null) => {
-    if (!name) return "U";
+  const getInitials = (email?: string | null) => {
+    if (!email) return "U";
+    // Use the part before @ as the name
+    const name = email.split("@")[0];
     return name
-      .split(" ")
+      .split(/[._-]/)
       .map((n) => n[0])
       .join("")
       .toUpperCase()
@@ -81,6 +83,8 @@ export function Header() {
     }
     return `${format(dateRange.from, "MMM d")} - ${format(dateRange.to, "MMM d, yyyy")}`;
   };
+
+  const displayName = user?.email ? user.email.split("@")[0] : "User";
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6">
@@ -259,22 +263,22 @@ export function Header() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="gap-2 pl-2 pr-3">
               <Avatar className="w-8 h-8">
-                <AvatarImage src={session?.user?.image || undefined} />
+                <AvatarImage src={undefined} />
                 <AvatarFallback className="text-xs">
-                  {getInitials(session?.user?.name)}
+                  {getInitials(user?.email)}
                 </AvatarFallback>
               </Avatar>
               <span className="hidden sm:inline-block text-sm font-medium max-w-[100px] truncate">
-                {session?.user?.name || "User"}
+                {displayName}
               </span>
               <ChevronDown className="w-4 h-4 text-slate-400" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[200px]">
             <div className="px-2 py-1.5">
-              <p className="font-medium text-sm">{session?.user?.name}</p>
+              <p className="font-medium text-sm">{displayName}</p>
               <p className="text-xs text-slate-500 truncate">
-                {session?.user?.email}
+                {user?.email}
               </p>
             </div>
             <DropdownMenuSeparator />

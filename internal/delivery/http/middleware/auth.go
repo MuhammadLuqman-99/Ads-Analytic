@@ -19,6 +19,12 @@ const (
 	ContextKeyClaims      = "claims"
 )
 
+// Cookie names for JWT tokens
+const (
+	AccessTokenCookie  = "access_token"
+	RefreshTokenCookie = "refresh_token"
+)
+
 // AuthMiddleware handles JWT authentication
 type AuthMiddleware struct {
 	jwtManager *jwt.Manager
@@ -34,17 +40,10 @@ func NewAuthMiddleware(jwtManager *jwt.Manager) *AuthMiddleware {
 // Authenticate returns a middleware that validates JWT tokens
 func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get token from Authorization header
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			m.abortWithError(c, errors.ErrUnauthorized("Missing authorization header"))
-			return
-		}
-
-		// Extract token from Bearer scheme
-		token, err := jwt.ExtractTokenFromHeader(authHeader)
-		if err != nil {
-			m.abortWithError(c, errors.ErrUnauthorized("Invalid authorization header"))
+		// Try to extract token from cookie first, then fall back to Authorization header
+		token := m.extractToken(c)
+		if token == "" {
+			m.abortWithError(c, errors.ErrUnauthorized("Missing authentication token"))
 			return
 		}
 
@@ -82,6 +81,24 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// extractToken tries to get token from cookie first, then Authorization header
+func (m *AuthMiddleware) extractToken(c *gin.Context) string {
+	// 1. Try cookie first (preferred for browser-based clients)
+	if token, err := c.Cookie(AccessTokenCookie); err == nil && token != "" {
+		return token
+	}
+
+	// 2. Fall back to Authorization header (for API clients)
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		if token, err := jwt.ExtractTokenFromHeader(authHeader); err == nil {
+			return token
+		}
+	}
+
+	return ""
 }
 
 // RequireRole returns a middleware that requires a specific role
@@ -264,14 +281,9 @@ func GetClaims(c *gin.Context) (*jwt.Claims, bool) {
 // It doesn't fail if no token is provided, but sets context if token is valid
 func (m *AuthMiddleware) OptionalAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.Next()
-			return
-		}
-
-		token, err := jwt.ExtractTokenFromHeader(authHeader)
-		if err != nil {
+		// Try to extract token from cookie or header
+		token := m.extractToken(c)
+		if token == "" {
 			c.Next()
 			return
 		}

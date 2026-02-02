@@ -227,6 +227,54 @@ func (h *AnalyticsHandler) GetReport(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": nil})
 }
 
+// ExportAnalytics handles GET /api/v1/analytics/export
+// @Summary Export analytics data
+// @Description Exports analytics data in CSV or Excel format
+// @Tags Analytics
+// @Accept json
+// @Produce text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param format query string false "Export format (csv, xlsx)" default(csv)
+// @Param start_date query string false "Start date (YYYY-MM-DD)"
+// @Param end_date query string false "End date (YYYY-MM-DD)"
+// @Success 200 {file} file
+// @Router /api/v1/analytics/export [get]
+func (h *AnalyticsHandler) ExportAnalytics(c *gin.Context) {
+	orgID, ok := middleware.GetOrgID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error": gin.H{
+				"code":    "UNAUTHORIZED",
+				"message": "Organization not found in context",
+			},
+		})
+		return
+	}
+
+	format := c.DefaultQuery("format", "csv")
+	dateRange := parseDateRangeFromQuery(c)
+
+	// Get analytics data for export
+	data, err := h.analyticsService.ExportAnalytics(c.Request.Context(), orgID, dateRange, format)
+	if err != nil {
+		respondWithError(c, err)
+		return
+	}
+
+	// Set appropriate headers based on format
+	filename := "analytics_export_" + dateRange.StartDate.Format("2006-01-02") + "_" + dateRange.EndDate.Format("2006-01-02")
+	switch format {
+	case "xlsx":
+		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		c.Header("Content-Disposition", "attachment; filename="+filename+".xlsx")
+	default:
+		c.Header("Content-Type", "text/csv")
+		c.Header("Content-Disposition", "attachment; filename="+filename+".csv")
+	}
+
+	c.Data(http.StatusOK, c.GetHeader("Content-Type"), data)
+}
+
 // Campaign handlers
 func (h *AnalyticsHandler) ListCampaigns(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
