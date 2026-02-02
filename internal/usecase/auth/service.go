@@ -18,13 +18,30 @@ import (
 
 // Service handles authentication and authorization logic
 type Service struct {
-	userRepo          repository.UserRepository
-	orgRepo           repository.OrganizationRepository
-	orgMemberRepo     repository.OrganizationMemberRepository
-	connectedAccRepo  repository.ConnectedAccountRepository
-	jwtManager        *jwt.Manager
-	connectorRegistry ConnectorRegistry
-	stateStore        StateStore
+	userRepo              repository.UserRepository
+	orgRepo               repository.OrganizationRepository
+	orgMemberRepo         repository.OrganizationMemberRepository
+	connectedAccRepo      repository.ConnectedAccountRepository
+	verificationTokenRepo repository.VerificationTokenRepository
+	jwtManager            *jwt.Manager
+	connectorRegistry     ConnectorRegistry
+	stateStore            StateStore
+	emailSender           EmailSender
+	emailConfig           EmailConfig
+}
+
+// EmailSender interface for sending emails
+type EmailSender interface {
+	SendHTML(ctx context.Context, to, toName, subject, htmlBody string) error
+}
+
+// EmailConfig holds email-related configuration
+type EmailConfig struct {
+	FrontendURL             string
+	EmailVerificationExpiry time.Duration
+	PasswordResetExpiry     time.Duration
+	AppName                 string
+	SupportEmail            string
 }
 
 // StateStore stores OAuth state for verification
@@ -45,18 +62,24 @@ func NewService(
 	orgRepo repository.OrganizationRepository,
 	orgMemberRepo repository.OrganizationMemberRepository,
 	connectedAccRepo repository.ConnectedAccountRepository,
+	verificationTokenRepo repository.VerificationTokenRepository,
 	jwtManager *jwt.Manager,
 	connectorRegistry ConnectorRegistry,
 	stateStore StateStore,
+	emailSender EmailSender,
+	emailConfig EmailConfig,
 ) *Service {
 	return &Service{
-		userRepo:          userRepo,
-		orgRepo:           orgRepo,
-		orgMemberRepo:     orgMemberRepo,
-		connectedAccRepo:  connectedAccRepo,
-		jwtManager:        jwtManager,
-		connectorRegistry: connectorRegistry,
-		stateStore:        stateStore,
+		userRepo:              userRepo,
+		orgRepo:               orgRepo,
+		orgMemberRepo:         orgMemberRepo,
+		connectedAccRepo:      connectedAccRepo,
+		verificationTokenRepo: verificationTokenRepo,
+		jwtManager:            jwtManager,
+		connectorRegistry:     connectorRegistry,
+		stateStore:            stateStore,
+		emailSender:           emailSender,
+		emailConfig:           emailConfig,
 	}
 }
 
@@ -255,6 +278,295 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassw
 
 	user.PasswordHash = string(hashedPassword)
 	return s.userRepo.Update(ctx, user)
+}
+
+// ============================================================================
+// Email Verification
+// ============================================================================
+
+// RequestEmailVerification sends an email verification link to the user
+func (s *Service) RequestEmailVerification(ctx context.Context, userID uuid.UUID) error {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return errors.ErrNotFound("User")
+	}
+
+	// Check if already verified
+	if user.EmailVerifiedAt != nil {
+		return errors.ErrBadRequest("Email already verified")
+	}
+
+	// Delete any existing tokens for this user
+	_ = s.verificationTokenRepo.DeleteByUserAndType(ctx, userID, entity.TokenTypeEmailVerification)
+
+	// Generate token
+	tokenStr, err := generateSecureToken()
+	if err != nil {
+		return errors.ErrInternal("Failed to generate verification token")
+	}
+
+	// Create verification token
+	token := entity.NewVerificationToken(
+		userID,
+		tokenStr,
+		entity.TokenTypeEmailVerification,
+		s.emailConfig.EmailVerificationExpiry,
+	)
+
+	if err := s.verificationTokenRepo.Create(ctx, token); err != nil {
+		return errors.ErrInternal("Failed to create verification token")
+	}
+
+	// Send verification email
+	if s.emailSender != nil {
+		verificationURL := fmt.Sprintf("%s/verify-email?token=%s", s.emailConfig.FrontendURL, tokenStr)
+		htmlBody := s.buildEmailVerificationHTML(user.FullName(), verificationURL)
+
+		if err := s.emailSender.SendHTML(ctx, user.Email, user.FullName(), "Verify Your Email", htmlBody); err != nil {
+			// Log error but don't fail the request
+			fmt.Printf("Failed to send verification email: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// VerifyEmail verifies a user's email with the provided token
+func (s *Service) VerifyEmail(ctx context.Context, tokenStr string) error {
+	token, err := s.verificationTokenRepo.GetByToken(ctx, tokenStr)
+	if err != nil {
+		return errors.ErrBadRequest("Invalid verification token")
+	}
+
+	// Check if token is valid
+	if !token.IsValid() {
+		if token.IsUsed {
+			return errors.ErrBadRequest("Token has already been used")
+		}
+		return errors.ErrBadRequest("Token has expired")
+	}
+
+	// Verify token type
+	if token.TokenType != entity.TokenTypeEmailVerification {
+		return errors.ErrBadRequest("Invalid token type")
+	}
+
+	// Mark token as used
+	if err := s.verificationTokenRepo.MarkAsUsed(ctx, token.ID); err != nil {
+		return errors.ErrInternal("Failed to mark token as used")
+	}
+
+	// Verify user's email
+	if err := s.userRepo.VerifyEmail(ctx, token.UserID); err != nil {
+		return errors.ErrInternal("Failed to verify email")
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Password Reset
+// ============================================================================
+
+// RequestPasswordReset sends a password reset email to the user
+func (s *Service) RequestPasswordReset(ctx context.Context, email string) error {
+	user, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		// Don't reveal if email exists
+		return nil
+	}
+
+	// Delete any existing password reset tokens for this user
+	_ = s.verificationTokenRepo.DeleteByUserAndType(ctx, user.ID, entity.TokenTypePasswordReset)
+
+	// Generate token
+	tokenStr, err := generateSecureToken()
+	if err != nil {
+		return errors.ErrInternal("Failed to generate reset token")
+	}
+
+	// Create password reset token
+	token := entity.NewVerificationToken(
+		user.ID,
+		tokenStr,
+		entity.TokenTypePasswordReset,
+		s.emailConfig.PasswordResetExpiry,
+	)
+
+	if err := s.verificationTokenRepo.Create(ctx, token); err != nil {
+		return errors.ErrInternal("Failed to create reset token")
+	}
+
+	// Send password reset email
+	if s.emailSender != nil {
+		resetURL := fmt.Sprintf("%s/reset-password?token=%s", s.emailConfig.FrontendURL, tokenStr)
+		htmlBody := s.buildPasswordResetHTML(user.FullName(), resetURL)
+
+		if err := s.emailSender.SendHTML(ctx, user.Email, user.FullName(), "Reset Your Password", htmlBody); err != nil {
+			// Log error but don't fail the request
+			fmt.Printf("Failed to send password reset email: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// ResetPassword resets a user's password using the provided token
+func (s *Service) ResetPassword(ctx context.Context, tokenStr, newPassword string) error {
+	token, err := s.verificationTokenRepo.GetByToken(ctx, tokenStr)
+	if err != nil {
+		return errors.ErrBadRequest("Invalid reset token")
+	}
+
+	// Check if token is valid
+	if !token.IsValid() {
+		if token.IsUsed {
+			return errors.ErrBadRequest("Token has already been used")
+		}
+		return errors.ErrBadRequest("Token has expired")
+	}
+
+	// Verify token type
+	if token.TokenType != entity.TokenTypePasswordReset {
+		return errors.ErrBadRequest("Invalid token type")
+	}
+
+	// Hash new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return errors.ErrInternal("Failed to hash password")
+	}
+
+	// Update password
+	if err := s.userRepo.UpdatePassword(ctx, token.UserID, string(hashedPassword)); err != nil {
+		return errors.ErrInternal("Failed to update password")
+	}
+
+	// Mark token as used
+	if err := s.verificationTokenRepo.MarkAsUsed(ctx, token.ID); err != nil {
+		return errors.ErrInternal("Failed to mark token as used")
+	}
+
+	// Delete all password reset tokens for this user
+	_ = s.verificationTokenRepo.DeleteByUserAndType(ctx, token.UserID, entity.TokenTypePasswordReset)
+
+	return nil
+}
+
+// ============================================================================
+// Profile Management
+// ============================================================================
+
+// UpdateProfileRequest represents a profile update request
+type UpdateProfileRequest struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Phone     string `json:"phone"`
+}
+
+// UpdateProfile updates a user's profile information
+func (s *Service) UpdateProfile(ctx context.Context, userID uuid.UUID, req *UpdateProfileRequest) (*entity.User, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, errors.ErrNotFound("User")
+	}
+
+	// Update fields
+	user.FirstName = req.FirstName
+	user.LastName = req.LastName
+	user.Phone = req.Phone
+
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return nil, errors.ErrInternal("Failed to update profile")
+	}
+
+	return user, nil
+}
+
+// GetUserProfile returns a user's profile by ID
+func (s *Service) GetUserProfile(ctx context.Context, userID uuid.UUID) (*entity.User, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, errors.ErrNotFound("User")
+	}
+	return user, nil
+}
+
+// ============================================================================
+// Email Templates (inline for simplicity)
+// ============================================================================
+
+func (s *Service) buildEmailVerificationHTML(userName, verificationURL string) string {
+	appName := s.emailConfig.AppName
+	if appName == "" {
+		appName = "Ads Analytics"
+	}
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .container { background: #fff; border-radius: 8px; padding: 40px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .logo { text-align: center; margin-bottom: 30px; font-size: 24px; font-weight: bold; color: #4F46E5; }
+        .button { display: inline-block; background: #4F46E5; color: #fff !important; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: 600; }
+        .footer { margin-top: 30px; font-size: 12px; color: #666; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">%s</div>
+        <h2>Verify Your Email</h2>
+        <p>Hi %s,</p>
+        <p>Please verify your email by clicking the button below:</p>
+        <p style="text-align: center;"><a href="%s" class="button">Verify Email</a></p>
+        <p>This link expires in 24 hours.</p>
+        <div class="footer"><p>&copy; %s</p></div>
+    </div>
+</body>
+</html>`, appName, userName, verificationURL, appName)
+}
+
+func (s *Service) buildPasswordResetHTML(userName, resetURL string) string {
+	appName := s.emailConfig.AppName
+	if appName == "" {
+		appName = "Ads Analytics"
+	}
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .container { background: #fff; border-radius: 8px; padding: 40px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .logo { text-align: center; margin-bottom: 30px; font-size: 24px; font-weight: bold; color: #4F46E5; }
+        .button { display: inline-block; background: #DC2626; color: #fff !important; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: 600; }
+        .footer { margin-top: 30px; font-size: 12px; color: #666; text-align: center; }
+        .warning { background: #FEF3C7; padding: 15px; border-radius: 4px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">%s</div>
+        <h2>Reset Your Password</h2>
+        <p>Hi %s,</p>
+        <p>Click the button below to reset your password:</p>
+        <p style="text-align: center;"><a href="%s" class="button">Reset Password</a></p>
+        <p>This link expires in 1 hour.</p>
+        <div class="warning"><strong>Didn't request this?</strong> Please ignore this email.</div>
+        <div class="footer"><p>&copy; %s</p></div>
+    </div>
+</body>
+</html>`, appName, userName, resetURL, appName)
+}
+
+// generateSecureToken generates a cryptographically secure random token
+func generateSecureToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // ============================================================================

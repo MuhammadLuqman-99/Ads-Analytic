@@ -30,6 +30,36 @@ type UserRepository interface {
 
 	// VerifyEmail marks the email as verified
 	VerifyEmail(ctx context.Context, id uuid.UUID) error
+
+	// UpdatePassword updates the user's password hash
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
+
+	// UpdateProfile updates the user's profile information
+	UpdateProfile(ctx context.Context, id uuid.UUID, firstName, lastName, phone string) error
+}
+
+// VerificationTokenRepository defines the interface for verification token persistence
+type VerificationTokenRepository interface {
+	// Create creates a new verification token
+	Create(ctx context.Context, token *entity.VerificationToken) error
+
+	// GetByToken retrieves a token by its value
+	GetByToken(ctx context.Context, token string) (*entity.VerificationToken, error)
+
+	// GetByUserAndType retrieves the latest token for a user by type
+	GetByUserAndType(ctx context.Context, userID uuid.UUID, tokenType entity.TokenType) (*entity.VerificationToken, error)
+
+	// MarkAsUsed marks a token as used
+	MarkAsUsed(ctx context.Context, id uuid.UUID) error
+
+	// DeleteByUser deletes all tokens for a user
+	DeleteByUser(ctx context.Context, userID uuid.UUID) error
+
+	// DeleteByUserAndType deletes all tokens of a specific type for a user
+	DeleteByUserAndType(ctx context.Context, userID uuid.UUID, tokenType entity.TokenType) error
+
+	// DeleteExpired deletes all expired tokens
+	DeleteExpired(ctx context.Context) error
 }
 
 // OrganizationRepository defines the interface for organization data persistence

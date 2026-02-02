@@ -187,7 +187,9 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement forgot password logic with email sending
+	// Request password reset (doesn't reveal if email exists)
+	_ = h.authService.RequestPasswordReset(c.Request.Context(), req.Email)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -207,7 +209,12 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement reset password logic
+	err := h.authService.ResetPassword(c.Request.Context(), req.Token, req.NewPassword)
+	if err != nil {
+		respondWithError(c, err)
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -236,20 +243,24 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 
 // UpdateProfile updates the current user's profile
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
-	var req struct {
-		FirstName string `json:"firstName"`
-		LastName  string `json:"lastName"`
-		Phone     string `json:"phone"`
-	}
+	userID, _ := middleware.GetUserID(c)
+
+	var req auth.UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondWithError(c, errors.ErrValidation(err.Error()))
 		return
 	}
 
-	// TODO: Implement profile update
+	user, err := h.authService.UpdateProfile(c.Request.Context(), userID, &req)
+	if err != nil {
+		respondWithError(c, err)
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
+			"user":    h.sanitizeUser(user),
 			"message": "Profile updated successfully",
 		},
 	})
@@ -278,6 +289,52 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"message": "Password changed successfully",
+		},
+	})
+}
+
+// VerifyEmail verifies a user's email with a token
+func (h *AuthHandler) VerifyEmail(c *gin.Context) {
+	var req struct {
+		Token string `json:"token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondWithError(c, errors.ErrValidation(err.Error()))
+		return
+	}
+
+	err := h.authService.VerifyEmail(c.Request.Context(), req.Token)
+	if err != nil {
+		respondWithError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"message": "Email verified successfully",
+		},
+	})
+}
+
+// ResendVerificationEmail resends the email verification link
+func (h *AuthHandler) ResendVerificationEmail(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		respondWithError(c, errors.ErrUnauthorized("User not authenticated"))
+		return
+	}
+
+	err := h.authService.RequestEmailVerification(c.Request.Context(), userID)
+	if err != nil {
+		respondWithError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"message": "Verification email sent",
 		},
 	})
 }

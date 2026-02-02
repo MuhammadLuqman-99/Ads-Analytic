@@ -15,6 +15,7 @@ type Config struct {
 	Database  DatabaseConfig
 	Redis     RedisConfig
 	JWT       JWTConfig
+	Email     EmailConfig
 	Meta      MetaConfig
 	TikTok    TikTokConfig
 	Shopee    ShopeeConfig
@@ -131,6 +132,23 @@ type HTTPClientConfig struct {
 	RetryWaitMax time.Duration
 }
 
+// EmailConfig holds email service configuration
+type EmailConfig struct {
+	Provider                 string        // smtp, sendgrid, resend
+	From                     string        // sender email address
+	FromName                 string        // sender display name
+	SMTPHost                 string        // SMTP server host
+	SMTPPort                 int           // SMTP server port
+	SMTPUser                 string        // SMTP username
+	SMTPPassword             string        // SMTP password
+	SMTPUseTLS               bool          // Use TLS for SMTP
+	SendGridAPIKey           string        // SendGrid API key
+	ResendAPIKey             string        // Resend API key
+	EmailVerificationExpiry  time.Duration // Email verification token expiry
+	PasswordResetExpiry      time.Duration // Password reset token expiry
+	FrontendURL              string        // Frontend URL for email links
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists
@@ -165,6 +183,21 @@ func Load() (*Config, error) {
 			Secret:             getEnv("JWT_SECRET", ""),
 			AccessTokenExpiry:  getEnvAsDuration("JWT_ACCESS_TOKEN_EXPIRY", 15*time.Minute),
 			RefreshTokenExpiry: getEnvAsDuration("JWT_REFRESH_TOKEN_EXPIRY", 7*24*time.Hour),
+		},
+		Email: EmailConfig{
+			Provider:                getEnv("EMAIL_PROVIDER", "smtp"),
+			From:                    getEnv("EMAIL_FROM", "noreply@example.com"),
+			FromName:                getEnv("EMAIL_FROM_NAME", "Ads Analytics"),
+			SMTPHost:                getEnv("SMTP_HOST", "smtp.gmail.com"),
+			SMTPPort:                getEnvAsInt("SMTP_PORT", 587),
+			SMTPUser:                getEnv("SMTP_USER", ""),
+			SMTPPassword:            getEnv("SMTP_PASSWORD", ""),
+			SMTPUseTLS:              getEnvAsBool("SMTP_USE_TLS", true),
+			SendGridAPIKey:          getEnv("SENDGRID_API_KEY", ""),
+			ResendAPIKey:            getEnv("RESEND_API_KEY", ""),
+			EmailVerificationExpiry: getEnvAsDuration("EMAIL_VERIFICATION_EXPIRY", 24*time.Hour),
+			PasswordResetExpiry:     getEnvAsDuration("PASSWORD_RESET_EXPIRY", 1*time.Hour),
+			FrontendURL:             getEnv("FRONTEND_URL", "http://localhost:3000"),
 		},
 		Meta: MetaConfig{
 			AppID:           getEnv("META_APP_ID", ""),

@@ -117,6 +117,7 @@ func (r *Router) setupPublicRoutes(rg *gin.RouterGroup) {
 		auth.POST("/refresh", r.authHandler.RefreshToken)
 		auth.POST("/forgot-password", r.authHandler.ForgotPassword)
 		auth.POST("/reset-password", r.authHandler.ResetPassword)
+		auth.POST("/verify-email", r.authHandler.VerifyEmail)
 
 		// Session check - optionally authenticated (returns user if token valid)
 		auth.GET("/session", r.authMiddleware.OptionalAuth(), r.authHandler.GetSession)
@@ -224,6 +225,7 @@ func (r *Router) setupProtectedRoutes(rg *gin.RouterGroup) {
 		user.GET("/me", r.authHandler.GetCurrentUser)
 		user.PUT("/me", r.authHandler.UpdateProfile)
 		user.POST("/change-password", r.authHandler.ChangePassword)
+		user.POST("/resend-verification", r.authHandler.ResendVerificationEmail)
 	}
 
 	// ============================================

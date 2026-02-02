@@ -57,6 +57,20 @@ func (r *UserRepository) VerifyEmail(ctx context.Context, id uuid.UUID) error {
 		Update("email_verified_at", gorm.Expr("NOW()")).Error
 }
 
+func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	return r.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).
+		Update("password_hash", passwordHash).Error
+}
+
+func (r *UserRepository) UpdateProfile(ctx context.Context, id uuid.UUID, firstName, lastName, phone string) error {
+	updates := map[string]interface{}{
+		"first_name": firstName,
+		"last_name":  lastName,
+		"phone":      phone,
+	}
+	return r.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Updates(updates).Error
+}
+
 var _ repository.UserRepository = (*UserRepository)(nil)
 
 // OrganizationRepository implements repository.OrganizationRepository
