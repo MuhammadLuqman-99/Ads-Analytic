@@ -20,8 +20,8 @@ const (
 	ErrCodeBadRequest   = "BAD_REQUEST"
 
 	// Platform-specific errors
-	ErrCodePlatformAPI         = "PLATFORM_API_ERROR"
-	ErrCodeRateLimit           = "RATE_LIMIT_EXCEEDED"
+	ErrCodePlatformAPI         = "PLATFORM_ERROR"
+	ErrCodeRateLimit           = "RATE_LIMITED"
 	ErrCodeTokenExpired        = "TOKEN_EXPIRED"
 	ErrCodeTokenInvalid        = "TOKEN_INVALID"
 	ErrCodeOAuthFailed         = "OAUTH_FAILED"
@@ -32,7 +32,43 @@ const (
 	ErrCodeSyncFailed   = "SYNC_FAILED"
 	ErrCodePartialSync  = "PARTIAL_SYNC"
 	ErrCodeSyncConflict = "SYNC_CONFLICT"
+
+	// Subscription/Billing errors
+	ErrCodeSubscriptionLimit   = "SUBSCRIPTION_LIMIT"
+	ErrCodeSubscriptionExpired = "SUBSCRIPTION_EXPIRED"
 )
+
+// FieldError represents a validation error for a specific field
+type FieldError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// ErrorResponse represents the standardized API error response
+type ErrorResponse struct {
+	Success bool         `json:"success"`
+	Error   *ErrorDetail `json:"error"`
+}
+
+// ErrorDetail contains the error information
+type ErrorDetail struct {
+	Code       string       `json:"code"`
+	Message    string       `json:"message"`
+	Details    []FieldError `json:"details,omitempty"`
+	RetryAfter int          `json:"retry_after,omitempty"` // seconds
+	Platform   string       `json:"platform,omitempty"`
+}
+
+// ToErrorResponse converts an AppError to an ErrorResponse
+func (e *AppError) ToErrorResponse() *ErrorResponse {
+	return &ErrorResponse{
+		Success: false,
+		Error: &ErrorDetail{
+			Code:    e.Code,
+			Message: e.Message,
+		},
+	}
+}
 
 // AppError represents an application error with additional context
 type AppError struct {
@@ -116,6 +152,47 @@ func ErrInternal(message string) *AppError {
 // ErrValidation creates a validation error
 func ErrValidation(message string) *AppError {
 	return New(ErrCodeValidation, message, http.StatusBadRequest)
+}
+
+// ValidationError represents a validation error with field-level details
+type ValidationError struct {
+	*AppError
+	Fields []FieldError
+}
+
+// NewValidationError creates a new validation error with field details
+func NewValidationError(message string, fields ...FieldError) *ValidationError {
+	return &ValidationError{
+		AppError: New(ErrCodeValidation, message, http.StatusBadRequest),
+		Fields:   fields,
+	}
+}
+
+// AddField adds a field error
+func (e *ValidationError) AddField(field, message string) *ValidationError {
+	e.Fields = append(e.Fields, FieldError{Field: field, Message: message})
+	return e
+}
+
+// ToErrorResponse converts ValidationError to ErrorResponse
+func (e *ValidationError) ToErrorResponse() *ErrorResponse {
+	return &ErrorResponse{
+		Success: false,
+		Error: &ErrorDetail{
+			Code:    e.Code,
+			Message: e.Message,
+			Details: e.Fields,
+		},
+	}
+}
+
+// ErrSubscriptionLimit creates a subscription limit error
+func ErrSubscriptionLimit(resource string, limit int) *AppError {
+	return New(
+		ErrCodeSubscriptionLimit,
+		fmt.Sprintf("Subscription limit reached: %s (max %d)", resource, limit),
+		http.StatusPaymentRequired,
+	).WithMetadata("resource", resource).WithMetadata("limit", fmt.Sprintf("%d", limit))
 }
 
 // ErrNotFound creates a not found error

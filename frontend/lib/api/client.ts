@@ -4,7 +4,7 @@ import axios, {
   AxiosRequestConfig,
   InternalAxiosRequestConfig,
 } from "axios";
-import { ApiError } from "./types";
+import { ApiError, ApiErrorResponse, ErrorCode, isApiError } from "./errors";
 
 // ============================================
 // Configuration
@@ -132,7 +132,10 @@ interface ApiClientOptions {
   baseURL?: string;
   timeout?: number;
   onUnauthorized?: () => void;
-  onError?: (error: ApiError) => void;
+  onForbidden?: () => void;
+  onRateLimited?: (retryAfter: number) => void;
+  onServerError?: (error: ApiError) => void;
+  onPlatformError?: (platform: string, error: ApiError) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -188,13 +191,27 @@ function createApiClient(options: ApiClientOptions = {}): AxiosInstance {
   // Response Interceptor
   client.interceptors.response.use(
     (response) => response,
-    async (error: AxiosError<ApiError>) => {
+    async (error: AxiosError<ApiErrorResponse>) => {
       const originalRequest = error.config as InternalAxiosRequestConfig & {
         _retry?: boolean;
       };
+      const status = error.response?.status || 0;
+
+      // Parse API error from response
+      const parseApiError = (): ApiError => {
+        if (error.response?.data?.error) {
+          return ApiError.fromResponse(error.response.data, status);
+        }
+        // Network or other errors
+        return new ApiError(
+          error.message || "A network error occurred",
+          ErrorCode.INTERNAL_ERROR,
+          status
+        );
+      };
 
       // Handle 401 Unauthorized
-      if (error.response?.status === 401 && !originalRequest._retry) {
+      if (status === 401 && !originalRequest._retry) {
         originalRequest._retry = true;
 
         // Try to refresh token (cookies sent automatically)
@@ -207,29 +224,36 @@ function createApiClient(options: ApiClientOptions = {}): AxiosInstance {
             // Refresh failed, redirect to login
             tokenManager.clearTokens();
             options.onUnauthorized?.();
-            return Promise.reject(refreshError);
+            return Promise.reject(parseApiError());
           }
         }
 
         // No refresh function, redirect to login
         tokenManager.clearTokens();
         options.onUnauthorized?.();
+        return Promise.reject(parseApiError());
       }
 
-      // Handle other errors
-      const apiError: ApiError = error.response?.data || {
-        code: "NETWORK_ERROR",
-        message: error.message || "A network error occurred",
-        status: error.response?.status || 0,
-      };
+      const apiError = parseApiError();
+
+      // Handle 403 Forbidden
+      if (status === 403) {
+        options.onForbidden?.();
+      }
+
+      // Handle 429 Rate Limited
+      if (status === 429 && apiError.retryAfter) {
+        options.onRateLimited?.(apiError.retryAfter);
+      }
 
       // Handle 500+ server errors
-      if (error.response && error.response.status >= 500) {
-        options.onError?.({
-          ...apiError,
-          code: "SERVER_ERROR",
-          message: "An unexpected server error occurred. Please try again later.",
-        });
+      if (status >= 500) {
+        options.onServerError?.(apiError);
+      }
+
+      // Handle platform errors
+      if (apiError.isPlatformError() && apiError.platform) {
+        options.onPlatformError?.(apiError.platform, apiError);
       }
 
       return Promise.reject(apiError);

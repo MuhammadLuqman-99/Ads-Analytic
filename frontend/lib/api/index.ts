@@ -14,6 +14,20 @@ export {
 // Types
 export * from "./types";
 
+// Errors
+export {
+  ApiError,
+  ErrorCode,
+  isApiError,
+  getErrorMessage,
+} from "./errors";
+export type {
+  ErrorCodeType,
+  FieldError,
+  ApiErrorDetail,
+  ApiErrorResponse,
+} from "./errors";
+
 // Services
 export {
   authApi,
@@ -58,6 +72,9 @@ export {
   useReportGenerator,
   analyticsKeys,
   analytics,
+  // Event Stream
+  useEventStream,
+  eventStream,
 } from "./hooks";
 
 // Re-export hook types
@@ -67,4 +84,7 @@ export type {
   UseCampaignOptions,
   UseConnectionsOptions,
   UseAnalyticsOptions,
+  UseEventStreamOptions,
+  SyncStatus,
+  ToastNotification,
 } from "./hooks";
