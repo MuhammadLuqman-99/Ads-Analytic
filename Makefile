@@ -30,9 +30,20 @@ help:
 	@echo "  make build          Build the Go backend"
 	@echo "  make run            Run the API server locally"
 	@echo "  make worker         Run the worker locally"
-	@echo "  make test           Run all tests"
 	@echo "  make lint           Run linters"
 	@echo "  make fmt            Format code"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test                Run all tests (backend + frontend)"
+	@echo "  make test-backend        Run Go backend tests"
+	@echo "  make test-backend-coverage  Run Go tests with coverage"
+	@echo "  make test-frontend       Run frontend unit tests"
+	@echo "  make test-frontend-watch Run frontend tests (watch mode)"
+	@echo "  make test-frontend-coverage Run frontend tests with coverage"
+	@echo "  make test-e2e            Run Playwright E2E tests"
+	@echo "  make test-e2e-ui         Run E2E tests with UI"
+	@echo "  make test-e2e-headed     Run E2E tests headed"
+	@echo "  make test-e2e-install    Install Playwright browsers"
 	@echo ""
 	@echo "Docker (Development):"
 	@echo "  make docker-dev     Start all services in dev mode"
@@ -69,8 +80,67 @@ worker:
 	go run ./cmd/worker
 
 test:
-	@echo "Running tests..."
+	@echo "Running all tests..."
+	@$(MAKE) test-backend
+	@$(MAKE) test-frontend
+
+## Run Go backend tests
+test-backend:
+	@echo "Running Go backend tests..."
 	go test -v -race -cover ./...
+
+## Run Go tests with coverage report
+test-backend-coverage:
+	@echo "Running Go tests with coverage..."
+	go test -v -race -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+## Run frontend unit tests
+test-frontend:
+	@echo "Running frontend tests..."
+	cd frontend && npm run test:run
+
+## Run frontend tests in watch mode
+test-frontend-watch:
+	@echo "Running frontend tests in watch mode..."
+	cd frontend && npm run test:watch
+
+## Run frontend tests with coverage
+test-frontend-coverage:
+	@echo "Running frontend tests with coverage..."
+	cd frontend && npm run test:coverage
+
+## Run E2E tests with Playwright
+test-e2e:
+	@echo "Running E2E tests..."
+	cd frontend && npm run test:e2e
+
+## Run E2E tests with UI
+test-e2e-ui:
+	@echo "Running E2E tests with UI..."
+	cd frontend && npm run test:e2e:ui
+
+## Run E2E tests in headed mode
+test-e2e-headed:
+	@echo "Running E2E tests in headed mode..."
+	cd frontend && npm run test:e2e:headed
+
+## Install Playwright browsers
+test-e2e-install:
+	@echo "Installing Playwright browsers..."
+	cd frontend && npx playwright install
+
+## Show E2E test report
+test-e2e-report:
+	@echo "Showing E2E test report..."
+	cd frontend && npm run test:e2e:report
+
+## Run all tests with coverage
+test-all-coverage:
+	@echo "Running all tests with coverage..."
+	@$(MAKE) test-backend-coverage
+	@$(MAKE) test-frontend-coverage
 
 lint:
 	@echo "Running linters..."
