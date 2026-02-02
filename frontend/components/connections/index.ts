@@ -1,12 +1,7 @@
 export { ConnectionCard } from "./ConnectionCard";
 export { AddConnectionModal } from "./AddConnectionModal";
 export { AccountDetailsModal } from "./AccountDetailsModal";
-export {
-  type AdAccount,
-  type SyncHistory,
-  type PlanLimits,
-  type ConnectionStatus,
-  mockAdAccounts,
-  mockSyncHistory,
-  mockPlanLimits,
-} from "./types";
+export { type PlanLimits } from "./types";
+
+// Re-export API types for convenience
+export type { ConnectedAccount, ConnectionStatus, SyncStatus, Platform } from "@/lib/api/types";

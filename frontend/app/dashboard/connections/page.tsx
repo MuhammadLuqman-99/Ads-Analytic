@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Plus, Zap, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,103 +10,194 @@ import {
   ConnectionCard,
   AddConnectionModal,
   AccountDetailsModal,
-  mockAdAccounts,
-  mockSyncHistory,
-  mockPlanLimits,
-  type AdAccount,
   type PlanLimits,
 } from "@/components/connections";
-import { type Platform } from "@/lib/mock-data";
+import { useConnections, useSyncStatus } from "@/lib/api/hooks";
+import type { Platform, ConnectedAccount } from "@/lib/api/types";
+
+// Toast notification component
+function Toast({
+  message,
+  type,
+  onClose,
+}: {
+  message: string;
+  type: "success" | "error";
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 5000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <div
+      className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg ${
+        type === "success"
+          ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+          : "bg-red-50 text-red-800 border border-red-200"
+      }`}
+    >
+      {type === "success" ? (
+        <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+      ) : (
+        <AlertCircle className="h-5 w-5 text-red-600" />
+      )}
+      <p className="text-sm font-medium">{message}</p>
+      <button
+        onClick={onClose}
+        className="ml-2 text-current opacity-50 hover:opacity-100"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+// Error messages mapping
+const errorMessages: Record<string, string> = {
+  permission_denied: "You denied permission to access your ad account. Please try again and grant the required permissions.",
+  access_denied: "Access was denied. Please try again.",
+  invalid_state: "Your session expired. Please try connecting again.",
+  state_expired: "Your session expired. Please try connecting again.",
+  token_exchange_failed: "Failed to connect your account. Please try again later.",
+  callback_failed: "Something went wrong. Please try again.",
+  no_code: "Authorization was not completed. Please try again.",
+  platform_mismatch: "Platform mismatch detected. Please try again.",
+};
 
 export default function ConnectionsPage() {
-  const [accounts, setAccounts] = useState<AdAccount[]>(mockAdAccounts);
-  const [planLimits, setPlanLimits] = useState<PlanLimits>(mockPlanLimits);
+  const searchParams = useSearchParams();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState<AdAccount | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<ConnectedAccount | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
+
+  // Use real API hook
+  const {
+    connections,
+    total,
+    activeCount,
+    errorCount,
+    isLoading,
+    connect,
+    disconnect,
+    sync,
+    reconnect,
+    isConnecting,
+    refetch,
+  } = useConnections();
+
+  // Get sync status for selected account
+  const { status: syncStatus } = useSyncStatus(selectedAccount?.id || "");
+
+  // Handle OAuth callback query params
+  useEffect(() => {
+    const success = searchParams.get("success");
+    const error = searchParams.get("error");
+    const platform = searchParams.get("platform");
+    const message = searchParams.get("message");
+    const accountId = searchParams.get("account_id");
+
+    if (success === "true" && platform) {
+      setToast({
+        message: `Successfully connected your ${platform.charAt(0).toUpperCase() + platform.slice(1)} account!`,
+        type: "success",
+      });
+      // Refresh connections list
+      refetch();
+      // Trigger initial sync if we have the account ID
+      if (accountId) {
+        sync(accountId).catch(console.error);
+      }
+      // Clear query params
+      window.history.replaceState({}, "", "/dashboard/connections");
+    } else if (error) {
+      const errorMessage = errorMessages[error] || message || "Failed to connect account. Please try again.";
+      setToast({
+        message: errorMessage,
+        type: "error",
+      });
+      // Clear query params
+      window.history.replaceState({}, "", "/dashboard/connections");
+    }
+  }, [searchParams, refetch, sync]);
+
+  // Plan limits (TODO: fetch from API)
+  const planLimits: PlanLimits = {
+    accountsLimit: 5,
+    accountsUsed: total,
+    currentPlan: "free",
+  };
 
   const handleRefresh = async (accountId: string) => {
     setRefreshingId(accountId);
-    // Update status to syncing
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId ? { ...acc, status: "syncing" as const } : acc
-      )
-    );
-
-    // Simulate sync
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Update with success
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId
-          ? { ...acc, status: "active" as const, lastSyncAt: new Date(), error: undefined }
-          : acc
-      )
-    );
-    setRefreshingId(null);
-  };
-
-  const handleDisconnect = (accountId: string) => {
-    if (confirm("Are you sure you want to disconnect this account?")) {
-      setAccounts((prev) => prev.filter((acc) => acc.id !== accountId));
-      setPlanLimits((prev) => ({
-        ...prev,
-        accountsUsed: Math.max(0, prev.accountsUsed - 1),
-      }));
+    try {
+      await sync(accountId);
+      setToast({ message: "Sync started successfully", type: "success" });
+    } catch (error) {
+      setToast({ message: "Failed to start sync", type: "error" });
+    } finally {
+      setRefreshingId(null);
     }
   };
 
-  const handleReconnect = async (accountId: string) => {
-    // Simulate OAuth flow
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+  const handleDisconnect = async (accountId: string) => {
+    if (confirm("Are you sure you want to disconnect this account?")) {
+      try {
+        await disconnect(accountId);
+        setToast({ message: "Account disconnected successfully", type: "success" });
+      } catch (error) {
+        setToast({ message: "Failed to disconnect account", type: "error" });
+      }
+    }
+  };
 
-    // Update account status
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId
-          ? { ...acc, status: "active" as const, error: undefined, lastSyncAt: new Date() }
-          : acc
-      )
-    );
+  const handleReconnect = async (accountId: string, platform: Platform) => {
+    try {
+      await reconnect({ accountId, platform });
+    } catch (error) {
+      setToast({ message: "Failed to initiate reconnection", type: "error" });
+    }
   };
 
   const handleConnect = async (platform: Platform) => {
-    // Simulate OAuth flow
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Add new account
-    const newAccount: AdAccount = {
-      id: String(Date.now()),
-      platform,
-      accountId: `${platform}_${Math.random().toString(36).substr(2, 9)}`,
-      accountName: `New ${platform.charAt(0).toUpperCase() + platform.slice(1)} Account`,
-      status: "active",
-      lastSyncAt: new Date(),
-      connectedAt: new Date(),
-    };
-
-    setAccounts((prev) => [...prev, newAccount]);
-    setPlanLimits((prev) => ({
-      ...prev,
-      accountsUsed: prev.accountsUsed + 1,
-    }));
+    try {
+      await connect(platform);
+      // The hook will redirect to OAuth URL
+    } catch (error) {
+      setToast({ message: "Failed to initiate connection", type: "error" });
+    }
   };
 
-  const handleViewDetails = (account: AdAccount) => {
+  const handleViewDetails = (account: ConnectedAccount) => {
     setSelectedAccount(account);
     setIsDetailsModalOpen(true);
   };
 
-  const activeAccounts = accounts.filter((a) => a.status === "active").length;
-  const errorAccounts = accounts.filter(
-    (a) => a.status === "error" || a.status === "expired"
-  ).length;
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
@@ -114,8 +206,15 @@ export default function ConnectionsPage() {
             Manage your connected advertising accounts
           </p>
         </div>
-        <Button onClick={() => setIsAddModalOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
+        <Button
+          onClick={() => setIsAddModalOpen(true)}
+          disabled={isConnecting}
+        >
+          {isConnecting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Plus className="h-4 w-4 mr-2" />
+          )}
           Connect Account
         </Button>
       </div>
@@ -138,9 +237,9 @@ export default function ConnectionsPage() {
             <div className="mt-3">
               <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-500 rounded-full"
+                  className="h-full bg-blue-500 rounded-full transition-all"
                   style={{
-                    width: `${(planLimits.accountsUsed / planLimits.accountsLimit) * 100}%`,
+                    width: `${Math.min((planLimits.accountsUsed / planLimits.accountsLimit) * 100, 100)}%`,
                   }}
                 />
               </div>
@@ -158,7 +257,7 @@ export default function ConnectionsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-500">Active</p>
-                <p className="text-2xl font-bold text-emerald-600">{activeAccounts}</p>
+                <p className="text-2xl font-bold text-emerald-600">{activeCount}</p>
               </div>
               <Badge className="bg-emerald-100 text-emerald-700">Syncing</Badge>
             </div>
@@ -170,9 +269,9 @@ export default function ConnectionsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-500">Needs Attention</p>
-                <p className="text-2xl font-bold text-amber-600">{errorAccounts}</p>
+                <p className="text-2xl font-bold text-amber-600">{errorCount}</p>
               </div>
-              {errorAccounts > 0 && (
+              {errorCount > 0 && (
                 <Badge className="bg-amber-100 text-amber-700">Action Required</Badge>
               )}
             </div>
@@ -207,7 +306,7 @@ export default function ConnectionsPage() {
 
       {/* Connections Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {accounts.map((account) => (
+        {connections.map((account) => (
           <ConnectionCard
             key={account.id}
             account={account}
@@ -230,7 +329,11 @@ export default function ConnectionsPage() {
               <p className="text-sm text-slate-500 text-center mb-4">
                 Connect a new advertising platform
               </p>
-              <Button variant="outline" onClick={() => setIsAddModalOpen(true)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsAddModalOpen(true)}
+                disabled={isConnecting}
+              >
                 Connect Account
               </Button>
             </CardContent>
@@ -239,7 +342,7 @@ export default function ConnectionsPage() {
       </div>
 
       {/* Empty State */}
-      {accounts.length === 0 && (
+      {connections.length === 0 && (
         <Card className="bg-white border-slate-200 border-dashed">
           <CardContent className="py-16 flex flex-col items-center justify-center">
             <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
@@ -252,8 +355,15 @@ export default function ConnectionsPage() {
               Connect your first ad account to start tracking campaigns and
               performance metrics across platforms.
             </p>
-            <Button onClick={() => setIsAddModalOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
+            <Button
+              onClick={() => setIsAddModalOpen(true)}
+              disabled={isConnecting}
+            >
+              {isConnecting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4 mr-2" />
+              )}
               Connect Your First Account
             </Button>
           </CardContent>
@@ -275,7 +385,7 @@ export default function ConnectionsPage() {
           setSelectedAccount(null);
         }}
         account={selectedAccount}
-        syncHistory={mockSyncHistory}
+        syncStatus={syncStatus}
         onSync={handleRefresh}
         onReconnect={handleReconnect}
         isSyncing={refreshingId === selectedAccount?.id}

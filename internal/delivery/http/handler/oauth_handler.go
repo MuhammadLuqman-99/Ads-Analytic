@@ -207,6 +207,114 @@ func (h *OAuthHandler) InitiateShopeeOAuth(c *gin.Context) {
 	})
 }
 
+// TikTokOAuthCallback handles the OAuth callback from TikTok
+func (h *OAuthHandler) TikTokOAuthCallback(c *gin.Context) {
+	code := c.Query("auth_code") // TikTok uses auth_code instead of code
+	state := c.Query("state")
+
+	// Handle errors from TikTok
+	if code == "" {
+		redirectURL := buildErrorRedirect("tiktok", "no_code", "Authorization code not provided")
+		c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+		return
+	}
+
+	if state == "" {
+		redirectURL := buildErrorRedirect("tiktok", "invalid_state", "State parameter missing")
+		c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+		return
+	}
+
+	// Process the callback
+	account, redirectURL, err := h.authService.HandleOAuthCallback(c.Request.Context(), entity.PlatformTikTok, code, state)
+	if err != nil {
+		errType := "callback_failed"
+		errMsg := "Failed to complete authorization"
+
+		if errors.IsAppError(err) {
+			appErr := err.(*errors.AppError)
+			switch appErr.Code {
+			case errors.ErrCodeBadRequest:
+				if appErr.Message == "Invalid OAuth state" {
+					errType = "invalid_state"
+					errMsg = "Authorization session expired or invalid. Please try again."
+				} else if appErr.Message == "OAuth state expired" {
+					errType = "state_expired"
+					errMsg = "Authorization session has expired. Please try again."
+				}
+			case errors.ErrCodeOAuthFailed:
+				errType = "token_exchange_failed"
+				errMsg = "Failed to exchange authorization code for access token."
+			}
+		}
+
+		redirectURL := buildErrorRedirect("tiktok", errType, errMsg)
+		c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+		return
+	}
+
+	// Success - redirect with account info
+	successURL := buildSuccessRedirect(redirectURL, "tiktok", account.ID.String())
+	c.Redirect(http.StatusTemporaryRedirect, successURL)
+}
+
+// ShopeeOAuthCallback handles the OAuth callback from Shopee
+func (h *OAuthHandler) ShopeeOAuthCallback(c *gin.Context) {
+	code := c.Query("code")
+	state := c.Query("state")
+	shopID := c.Query("shop_id")
+
+	// Handle errors from Shopee
+	if code == "" {
+		redirectURL := buildErrorRedirect("shopee", "no_code", "Authorization code not provided")
+		c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+		return
+	}
+
+	if state == "" {
+		redirectURL := buildErrorRedirect("shopee", "invalid_state", "State parameter missing")
+		c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+		return
+	}
+
+	// Process the callback - include shop_id in code for downstream processing
+	codeWithShop := code
+	if shopID != "" {
+		codeWithShop = code + "|" + shopID // Encode shop_id with code
+	}
+
+	account, redirectURL, err := h.authService.HandleOAuthCallback(c.Request.Context(), entity.PlatformShopee, codeWithShop, state)
+	if err != nil {
+		errType := "callback_failed"
+		errMsg := "Failed to complete authorization"
+
+		if errors.IsAppError(err) {
+			appErr := err.(*errors.AppError)
+			switch appErr.Code {
+			case errors.ErrCodeBadRequest:
+				if appErr.Message == "Invalid OAuth state" {
+					errType = "invalid_state"
+					errMsg = "Authorization session expired or invalid. Please try again."
+				} else if appErr.Message == "OAuth state expired" {
+					errType = "state_expired"
+					errMsg = "Authorization session has expired. Please try again."
+				}
+			case errors.ErrCodeOAuthFailed:
+				errType = "token_exchange_failed"
+				errMsg = "Failed to exchange authorization code for access token."
+			}
+		}
+
+		redirectURL := buildErrorRedirect("shopee", errType, errMsg)
+		c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+		return
+	}
+
+	// Success - redirect with account info
+	successURL := buildSuccessRedirect(redirectURL, "shopee", account.ID.String())
+	c.Redirect(http.StatusTemporaryRedirect, successURL)
+}
+
 // Helper functions
 
 // mapMetaError maps Meta OAuth error codes to user-friendly types

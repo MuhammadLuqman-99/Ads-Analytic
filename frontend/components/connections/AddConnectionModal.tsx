@@ -5,7 +5,7 @@ import { X, ExternalLink, Check, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { getPlatformName, type Platform } from "@/lib/mock-data";
+import { type Platform } from "@/lib/api/types";
 import { type PlanLimits } from "./types";
 
 interface AddConnectionModalProps {
@@ -17,6 +17,9 @@ interface AddConnectionModalProps {
 
 type ConnectionStep = "select" | "connecting" | "success" | "error";
 
+// Only show supported platforms in the connection modal
+const supportedPlatforms: Platform[] = ["meta", "tiktok", "shopee"];
+
 const platformConfigs: Record<
   Platform,
   { name: string; description: string; bg: string; text: string; icon: string }
@@ -27,6 +30,13 @@ const platformConfigs: Record<
     bg: "bg-blue-100 hover:bg-blue-200",
     text: "text-blue-600",
     icon: "M",
+  },
+  google: {
+    name: "Google Ads",
+    description: "Connect Google Ads accounts",
+    bg: "bg-red-100 hover:bg-red-200",
+    text: "text-red-600",
+    icon: "G",
   },
   tiktok: {
     name: "TikTok Ads",
@@ -41,6 +51,13 @@ const platformConfigs: Record<
     bg: "bg-orange-100 hover:bg-orange-200",
     text: "text-orange-600",
     icon: "S",
+  },
+  linkedin: {
+    name: "LinkedIn Ads",
+    description: "Connect LinkedIn Marketing accounts",
+    bg: "bg-blue-100 hover:bg-blue-200",
+    text: "text-blue-700",
+    icon: "L",
   },
 };
 
@@ -168,7 +185,7 @@ export function AddConnectionModal({
                 <p className="text-sm text-slate-500 mb-4">
                   Select a platform to connect your ad account
                 </p>
-                {(Object.keys(platformConfigs) as Platform[]).map((platform) => {
+                {supportedPlatforms.map((platform) => {
                   const config = platformConfigs[platform];
                   return (
                     <button

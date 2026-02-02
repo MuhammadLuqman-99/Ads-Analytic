@@ -22,15 +22,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { getPlatformName, type Platform } from "@/lib/mock-data";
-import { type AdAccount, type ConnectionStatus } from "./types";
+import type { Platform, ConnectedAccount, ConnectionStatus } from "@/lib/api/types";
+import { getPlatformName, getPlatformBgClass, getPlatformTextClass, getPlatformInitial } from "@/lib/platform-utils";
 
 interface ConnectionCardProps {
-  account: AdAccount;
+  account: ConnectedAccount;
   onRefresh: (accountId: string) => void;
   onDisconnect: (accountId: string) => void;
-  onReconnect: (accountId: string) => void;
-  onViewDetails: (account: AdAccount) => void;
+  onReconnect: (accountId: string, platform: Platform) => void;
+  onViewDetails: (account: ConnectedAccount) => void;
   isRefreshing?: boolean;
 }
 
@@ -42,12 +42,7 @@ const statusConfig: Record<
   error: { label: "Error", color: "bg-red-100 text-red-700", icon: AlertTriangle },
   expired: { label: "Expired", color: "bg-amber-100 text-amber-700", icon: AlertTriangle },
   syncing: { label: "Syncing", color: "bg-blue-100 text-blue-700", icon: RefreshCw },
-};
-
-const platformLogos: Record<Platform, { bg: string; text: string }> = {
-  meta: { bg: "bg-blue-100", text: "text-blue-600" },
-  tiktok: { bg: "bg-slate-900", text: "text-white" },
-  shopee: { bg: "bg-orange-100", text: "text-orange-600" },
+  disconnected: { label: "Disconnected", color: "bg-slate-100 text-slate-700", icon: Unplug },
 };
 
 export function ConnectionCard({
@@ -58,9 +53,8 @@ export function ConnectionCard({
   onViewDetails,
   isRefreshing,
 }: ConnectionCardProps) {
-  const status = statusConfig[account.status];
+  const status = statusConfig[account.status] || statusConfig.disconnected;
   const StatusIcon = status.icon;
-  const platformStyle = platformLogos[account.platform];
   const hasError = account.status === "error" || account.status === "expired";
 
   return (
@@ -78,17 +72,15 @@ export function ConnectionCard({
             <div
               className={cn(
                 "w-12 h-12 rounded-lg flex items-center justify-center font-bold text-lg",
-                platformStyle.bg,
-                platformStyle.text
+                getPlatformBgClass(account.platform),
+                getPlatformTextClass(account.platform)
               )}
             >
-              {account.platform === "meta" && "M"}
-              {account.platform === "tiktok" && "T"}
-              {account.platform === "shopee" && "S"}
+              {getPlatformInitial(account.platform)}
             </div>
             <div>
-              <h3 className="font-semibold text-slate-900">{account.accountName}</h3>
-              <p className="text-sm text-slate-500">{account.accountId}</p>
+              <h3 className="font-semibold text-slate-900">{account.platformAccountName}</h3>
+              <p className="text-sm text-slate-500">{account.platformAccountId}</p>
             </div>
           </div>
 
@@ -143,7 +135,7 @@ export function ConnectionCard({
                     size="sm"
                     variant="outline"
                     className="mt-2 border-amber-300 text-amber-700 hover:bg-amber-100"
-                    onClick={() => onReconnect(account.id)}
+                    onClick={() => onReconnect(account.id, account.platform)}
                   >
                     <ExternalLink className="h-3 w-3 mr-1" />
                     Reconnect Account
@@ -175,7 +167,7 @@ export function ConnectionCard({
           <div className="flex items-center gap-1 text-slate-500">
             <Clock className="h-4 w-4" />
             {account.lastSyncAt ? (
-              <span>Synced {formatDistanceToNow(account.lastSyncAt, { addSuffix: true })}</span>
+              <span>Synced {formatDistanceToNow(new Date(account.lastSyncAt), { addSuffix: true })}</span>
             ) : (
               <span>Never synced</span>
             )}

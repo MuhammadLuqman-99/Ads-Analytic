@@ -15,16 +15,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { getPlatformName, type Platform } from "@/lib/mock-data";
-import { type AdAccount, type SyncHistory, type ConnectionStatus } from "./types";
+import type { Platform, ConnectedAccount, ConnectionStatus, SyncStatus } from "@/lib/api/types";
+import { getPlatformName, getPlatformBgClass, getPlatformTextClass, getPlatformInitial } from "@/lib/platform-utils";
 
 interface AccountDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  account: AdAccount | null;
-  syncHistory: SyncHistory[];
+  account: ConnectedAccount | null;
+  syncStatus?: SyncStatus | null;
   onSync: (accountId: string) => void;
-  onReconnect: (accountId: string) => void;
+  onReconnect: (accountId: string, platform: Platform) => void;
   isSyncing?: boolean;
 }
 
@@ -33,30 +33,21 @@ const statusConfig: Record<ConnectionStatus, { label: string; color: string }> =
   error: { label: "Error", color: "bg-red-100 text-red-700" },
   expired: { label: "Expired", color: "bg-amber-100 text-amber-700" },
   syncing: { label: "Syncing", color: "bg-blue-100 text-blue-700" },
-};
-
-const platformStyles: Record<Platform, { bg: string; text: string }> = {
-  meta: { bg: "bg-blue-100", text: "text-blue-600" },
-  tiktok: { bg: "bg-slate-900", text: "text-white" },
-  shopee: { bg: "bg-orange-100", text: "text-orange-600" },
+  disconnected: { label: "Disconnected", color: "bg-slate-100 text-slate-700" },
 };
 
 export function AccountDetailsModal({
   isOpen,
   onClose,
   account,
-  syncHistory,
+  syncStatus,
   onSync,
   onReconnect,
   isSyncing,
 }: AccountDetailsModalProps) {
   if (!isOpen || !account) return null;
 
-  const status = statusConfig[account.status];
-  const platformStyle = platformStyles[account.platform];
-  const accountSyncHistory = syncHistory
-    .filter((s) => s.accountId === account.id)
-    .slice(0, 10);
+  const status = statusConfig[account.status] || statusConfig.disconnected;
   const hasError = account.status === "error" || account.status === "expired";
 
   return (
@@ -75,17 +66,15 @@ export function AccountDetailsModal({
             <div
               className={cn(
                 "w-12 h-12 rounded-lg flex items-center justify-center font-bold text-xl",
-                platformStyle.bg,
-                platformStyle.text
+                getPlatformBgClass(account.platform),
+                getPlatformTextClass(account.platform)
               )}
             >
-              {account.platform === "meta" && "M"}
-              {account.platform === "tiktok" && "T"}
-              {account.platform === "shopee" && "S"}
+              {getPlatformInitial(account.platform)}
             </div>
             <div>
               <h2 className="text-xl font-semibold text-slate-900">
-                {account.accountName}
+                {account.platformAccountName}
               </h2>
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant={account.platform}>
@@ -113,10 +102,11 @@ export function AccountDetailsModal({
                     {account.error.type === "permission_denied" && "Permission Denied"}
                     {account.error.type === "api_error" && "API Error"}
                     {account.error.type === "rate_limit" && "Rate Limited"}
+                    {account.error.type === "account_suspended" && "Account Suspended"}
                   </p>
                   <p className="text-sm text-amber-700 mt-1">{account.error.message}</p>
                   <p className="text-xs text-amber-600 mt-2">
-                    Occurred {formatDistanceToNow(account.error.occurredAt, { addSuffix: true })}
+                    Occurred {formatDistanceToNow(new Date(account.error.occurredAt), { addSuffix: true })}
                   </p>
                 </div>
               </div>
@@ -132,7 +122,7 @@ export function AccountDetailsModal({
                   <Hash className="h-4 w-4" />
                   <span className="text-xs">Account ID</span>
                 </div>
-                <p className="font-mono text-sm text-slate-900">{account.accountId}</p>
+                <p className="font-mono text-sm text-slate-900">{account.platformAccountId}</p>
               </div>
               <div className="p-3 bg-slate-50 rounded-lg">
                 <div className="flex items-center gap-2 text-slate-500 mb-1">
@@ -140,7 +130,7 @@ export function AccountDetailsModal({
                   <span className="text-xs">Connected</span>
                 </div>
                 <p className="text-sm text-slate-900">
-                  {format(account.connectedAt, "MMM d, yyyy")}
+                  {format(new Date(account.connectedAt), "MMM d, yyyy")}
                 </p>
               </div>
               <div className="p-3 bg-slate-50 rounded-lg">
@@ -150,7 +140,7 @@ export function AccountDetailsModal({
                 </div>
                 <p className="text-sm text-slate-900">
                   {account.lastSyncAt
-                    ? formatDistanceToNow(account.lastSyncAt, { addSuffix: true })
+                    ? formatDistanceToNow(new Date(account.lastSyncAt), { addSuffix: true })
                     : "Never"}
                 </p>
               </div>
@@ -160,61 +150,68 @@ export function AccountDetailsModal({
                   <span className="text-xs">Sync Status</span>
                 </div>
                 <p className="text-sm text-slate-900">
-                  {account.status === "syncing" ? "In Progress" : "Idle"}
+                  {syncStatus?.status === "syncing"
+                    ? `In Progress (${syncStatus.progress}%)`
+                    : account.status === "syncing"
+                      ? "In Progress"
+                      : "Idle"}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Sync History */}
+          {/* Sync Status */}
           <div>
-            <h3 className="text-sm font-medium text-slate-500 mb-3">Sync History</h3>
-            {accountSyncHistory.length === 0 ? (
+            <h3 className="text-sm font-medium text-slate-500 mb-3">Last Sync</h3>
+            {!syncStatus && !account.lastSuccessfulSyncAt ? (
               <p className="text-sm text-slate-400 text-center py-6">
                 No sync history available
               </p>
             ) : (
-              <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {accountSyncHistory.map((sync) => (
-                  <div
-                    key={sync.id}
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
-                  >
+              <div className="space-y-2">
+                {syncStatus && (
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                     <div className="flex items-center gap-3">
-                      {sync.status === "success" && (
+                      {syncStatus.status === "completed" && (
                         <CheckCircle className="h-5 w-5 text-emerald-500" />
                       )}
-                      {sync.status === "failed" && (
+                      {syncStatus.status === "failed" && (
                         <XCircle className="h-5 w-5 text-red-500" />
                       )}
-                      {sync.status === "partial" && (
-                        <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      {syncStatus.status === "syncing" && (
+                        <RefreshCw className="h-5 w-5 text-blue-500 animate-spin" />
+                      )}
+                      {syncStatus.status === "idle" && (
+                        <Clock className="h-5 w-5 text-slate-400" />
                       )}
                       <div>
                         <p className="text-sm font-medium text-slate-900">
-                          {sync.status === "success" && "Sync Completed"}
-                          {sync.status === "failed" && "Sync Failed"}
-                          {sync.status === "partial" && "Partial Sync"}
+                          {syncStatus.status === "completed" && "Sync Completed"}
+                          {syncStatus.status === "failed" && "Sync Failed"}
+                          {syncStatus.status === "syncing" && "Syncing..."}
+                          {syncStatus.status === "idle" && "Ready"}
                         </p>
-                        <p className="text-xs text-slate-500">
-                          {format(sync.startedAt, "MMM d, yyyy 'at' h:mm a")}
-                        </p>
+                        {syncStatus.completedAt && (
+                          <p className="text-xs text-slate-500">
+                            {format(new Date(syncStatus.completedAt), "MMM d, yyyy 'at' h:mm a")}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
-                      {sync.recordsSynced !== undefined && (
+                      {syncStatus.syncedRecords !== undefined && (
                         <p className="text-sm text-slate-900">
-                          {sync.recordsSynced.toLocaleString()} records
+                          {syncStatus.syncedRecords.toLocaleString()} records
                         </p>
                       )}
-                      {sync.error && (
+                      {syncStatus.error && (
                         <p className="text-xs text-red-500 max-w-[200px] truncate">
-                          {sync.error}
+                          {syncStatus.error}
                         </p>
                       )}
                     </div>
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>
@@ -226,7 +223,7 @@ export function AccountDetailsModal({
             </Button>
             <div className="flex items-center gap-3">
               {hasError && account.error?.type === "token_expired" && (
-                <Button onClick={() => onReconnect(account.id)}>
+                <Button onClick={() => onReconnect(account.id, account.platform)}>
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Reconnect Account
                 </Button>

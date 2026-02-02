@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi } from "../services";
+import { accountsApi, ListConnectionsResponse } from "../services/accounts";
 import type { Platform, ConnectedAccount, SyncStatus } from "../types";
 
 // ============================================
@@ -44,10 +44,11 @@ export function useConnections(options: UseConnectionsOptions = {}) {
 
   // Connect mutation (initiates OAuth)
   const connectMutation = useMutation({
-    mutationFn: (platform: Platform) => accountsApi.initiateConnection(platform),
+    mutationFn: (platform: Platform) =>
+      accountsApi.initiateConnection(platform, "/dashboard/connections"),
     onSuccess: (data) => {
       // Redirect to OAuth URL
-      if (typeof window !== "undefined") {
+      if (typeof window !== "undefined" && data.authUrl) {
         window.location.href = data.authUrl;
       }
     },
@@ -60,11 +61,12 @@ export function useConnections(options: UseConnectionsOptions = {}) {
       // Remove from cache
       queryClient.setQueryData(
         connectionKeys.list({ platform, status }),
-        (old: Awaited<ReturnType<typeof accountsApi.listConnections>> | undefined) => {
+        (old: ListConnectionsResponse | undefined) => {
           if (!old) return old;
           return {
             ...old,
             data: old.data.filter((a) => a.id !== accountId),
+            total: old.total - 1,
           };
         }
       );
@@ -82,7 +84,7 @@ export function useConnections(options: UseConnectionsOptions = {}) {
       // Update account status to syncing
       queryClient.setQueryData(
         connectionKeys.list({ platform, status }),
-        (old: Awaited<ReturnType<typeof accountsApi.listConnections>> | undefined) => {
+        (old: ListConnectionsResponse | undefined) => {
           if (!old) return old;
           return {
             ...old,
@@ -95,20 +97,17 @@ export function useConnections(options: UseConnectionsOptions = {}) {
     },
   });
 
-  // Sync all mutation
-  const syncAllMutation = useMutation({
-    mutationFn: accountsApi.syncAllAccounts,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: connectionKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: connectionKeys.syncStatus() });
-    },
-  });
-
   // Reconnect mutation
   const reconnectMutation = useMutation({
-    mutationFn: (accountId: string) => accountsApi.reconnect(accountId),
+    mutationFn: ({
+      accountId,
+      platform,
+    }: {
+      accountId: string;
+      platform: Platform;
+    }) => accountsApi.reconnect(accountId, platform),
     onSuccess: (data) => {
-      if (typeof window !== "undefined") {
+      if (typeof window !== "undefined" && data.authUrl) {
         window.location.href = data.authUrl;
       }
     },
@@ -117,7 +116,7 @@ export function useConnections(options: UseConnectionsOptions = {}) {
   return {
     // Data
     connections: query.data?.data || [],
-    pagination: query.data?.pagination,
+    total: query.data?.total || 0,
 
     // Computed
     activeCount: query.data?.data.filter((a) => a.status === "active").length || 0,
@@ -135,14 +134,12 @@ export function useConnections(options: UseConnectionsOptions = {}) {
     connect: connectMutation.mutateAsync,
     disconnect: disconnectMutation.mutateAsync,
     sync: syncMutation.mutateAsync,
-    syncAll: syncAllMutation.mutate,
     reconnect: reconnectMutation.mutateAsync,
 
     // Mutation states
     isConnecting: connectMutation.isPending,
     isDisconnecting: disconnectMutation.isPending,
     isSyncing: syncMutation.isPending,
-    isSyncingAll: syncAllMutation.isPending,
     isReconnecting: reconnectMutation.isPending,
   };
 }
@@ -152,8 +149,6 @@ export function useConnections(options: UseConnectionsOptions = {}) {
 // ============================================
 
 export function useConnection(accountId: string, enabled = true) {
-  const queryClient = useQueryClient();
-
   const query = useQuery({
     queryKey: connectionKeys.detail(accountId),
     queryFn: () => accountsApi.getConnection(accountId),
@@ -161,23 +156,11 @@ export function useConnection(accountId: string, enabled = true) {
     staleTime: 2 * 60 * 1000,
   });
 
-  // Update settings mutation
-  const updateSettingsMutation = useMutation({
-    mutationFn: (settings: { syncFrequency?: number }) =>
-      accountsApi.updateSettings(accountId, settings),
-    onSuccess: (updatedAccount) => {
-      queryClient.setQueryData(connectionKeys.detail(accountId), updatedAccount);
-      queryClient.invalidateQueries({ queryKey: connectionKeys.lists() });
-    },
-  });
-
   return {
     connection: query.data,
     isLoading: query.isLoading,
     error: query.error,
     refetch: query.refetch,
-    updateSettings: updateSettingsMutation.mutateAsync,
-    isUpdating: updateSettingsMutation.isPending,
   };
 }
 
@@ -185,11 +168,10 @@ export function useConnection(accountId: string, enabled = true) {
 // useSyncStatus Hook
 // ============================================
 
-export function useSyncStatus(accountId?: string) {
-  // Single account sync status
-  const singleQuery = useQuery({
-    queryKey: connectionKeys.syncStatusById(accountId || ""),
-    queryFn: () => accountsApi.getSyncStatus(accountId!),
+export function useSyncStatus(accountId: string) {
+  const query = useQuery({
+    queryKey: connectionKeys.syncStatusById(accountId),
+    queryFn: () => accountsApi.getSyncStatus(accountId),
     enabled: !!accountId,
     refetchInterval: (query) => {
       // Poll while syncing
@@ -201,31 +183,11 @@ export function useSyncStatus(accountId?: string) {
     },
   });
 
-  // All accounts sync status
-  const allQuery = useQuery({
-    queryKey: connectionKeys.syncStatus(),
-    queryFn: accountsApi.getAllSyncStatus,
-    enabled: !accountId,
-    refetchInterval: (query) => {
-      const data = query.state.data as SyncStatus[] | undefined;
-      if (data?.some((s) => s.status === "syncing")) {
-        return 2000;
-      }
-      return false;
-    },
-  });
-
-  return accountId
-    ? {
-        status: singleQuery.data,
-        isLoading: singleQuery.isLoading,
-        refetch: singleQuery.refetch,
-      }
-    : {
-        statuses: allQuery.data,
-        isLoading: allQuery.isLoading,
-        refetch: allQuery.refetch,
-      };
+  return {
+    status: query.data,
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+  };
 }
 
 // ============================================

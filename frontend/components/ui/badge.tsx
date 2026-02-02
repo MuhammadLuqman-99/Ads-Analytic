@@ -22,10 +22,14 @@ const badgeVariants = cva(
                     "bg-transparent text-slate-700 border border-slate-200",
                 meta:
                     "bg-blue-500/20 text-blue-400 border border-blue-500/30",
+                google:
+                    "bg-red-500/20 text-red-400 border border-red-500/30",
                 tiktok:
                     "bg-slate-500/20 text-slate-300 border border-slate-500/30",
                 shopee:
                     "bg-orange-500/20 text-orange-400 border border-orange-500/30",
+                linkedin:
+                    "bg-blue-600/20 text-blue-500 border border-blue-600/30",
             },
         },
         defaultVariants: {
