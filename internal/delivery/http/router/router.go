@@ -40,6 +40,7 @@ type Router struct {
 	authHandler      *handler.AuthHandler
 	platformHandler  *handler.PlatformHandler
 	analyticsHandler *handler.AnalyticsHandler
+	eventsHandler    *handler.EventsHandler
 
 	// Middleware
 	authMiddleware      *middleware.AuthMiddleware
@@ -52,6 +53,7 @@ func NewRouter(
 	authHandler *handler.AuthHandler,
 	platformHandler *handler.PlatformHandler,
 	analyticsHandler *handler.AnalyticsHandler,
+	eventsHandler *handler.EventsHandler,
 	authMiddleware *middleware.AuthMiddleware,
 	rateLimitMiddleware *middleware.RateLimitMiddleware,
 ) *Router {
@@ -67,6 +69,7 @@ func NewRouter(
 		authHandler:         authHandler,
 		platformHandler:     platformHandler,
 		analyticsHandler:    analyticsHandler,
+		eventsHandler:       eventsHandler,
 		authMiddleware:      authMiddleware,
 		rateLimitMiddleware: rateLimitMiddleware,
 	}
@@ -153,6 +156,17 @@ func (r *Router) setupProtectedRoutes(rg *gin.RouterGroup) {
 		dashboard.GET("/timeseries", r.analyticsHandler.GetTrends)
 		dashboard.GET("/platforms", r.analyticsHandler.GetPlatformComparison)
 		dashboard.GET("/top-campaigns", r.analyticsHandler.GetTopPerformers)
+	}
+
+	// ============================================
+	// Events routes (SSE for real-time updates)
+	// ============================================
+	if r.eventsHandler != nil {
+		events := protected.Group("/events")
+		{
+			events.GET("/stream", r.eventsHandler.Stream)
+			events.GET("/status", r.eventsHandler.GetStatus)
+		}
 	}
 
 	// ============================================

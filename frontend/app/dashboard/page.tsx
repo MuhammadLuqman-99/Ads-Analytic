@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react";
 import {
-  RefreshCw,
   DollarSign,
   TrendingUp,
   ShoppingCart,
@@ -25,11 +24,11 @@ import {
   PlatformCards,
   TopCampaigns,
   RecentActivity,
+  SyncStatusIndicator,
 } from "@/components/dashboard";
 import { useDashboard } from "@/lib/api/hooks/use-dashboard";
 import type { DateRange } from "@/lib/api/types";
 import type { Platform } from "@/lib/mock-data";
-import { cn } from "@/lib/utils";
 
 // Helper to format currency
 function formatCurrency(value: number): string {
@@ -163,16 +162,12 @@ export default function DashboardPage() {
             </PopoverContent>
           </Popover>
 
-          {/* Sync Button */}
-          <Button
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw
-              className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")}
-            />
-            {isFetching ? "Syncing..." : "Refresh"}
-          </Button>
+          {/* Sync Status Indicator */}
+          <SyncStatusIndicator
+            onManualSync={() => refetch()}
+            isSyncingManual={isFetching}
+            lastSyncedAt={(summary as { lastSyncedAt?: string })?.lastSyncedAt}
+          />
         </div>
       </div>
 

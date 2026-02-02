@@ -15,6 +15,7 @@ import (
 	"github.com/ads-aggregator/ads-aggregator/internal/delivery/http/router"
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/cache"
+	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/events"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/meta"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/shopee"
@@ -82,10 +83,15 @@ func main() {
 		cfg.RateLimit.Requests*2, // burst
 	)
 
+	// Initialize event broadcaster for SSE
+	broadcaster := events.NewBroadcaster()
+	log.Info().Msg("Event broadcaster initialized")
+
 	// Initialize handlers (with nil services for now - would be injected with DI)
 	authHandler := handler.NewAuthHandler(nil)
 	platformHandler := handler.NewPlatformHandler(nil, nil)
 	analyticsHandler := handler.NewAnalyticsHandler(nil, appCache)
+	eventsHandler := handler.NewEventsHandler(broadcaster)
 
 	// Initialize router
 	routerConfig := &router.Config{
@@ -102,6 +108,7 @@ func main() {
 		authHandler,
 		platformHandler,
 		analyticsHandler,
+		eventsHandler,
 		authMiddleware,
 		rateLimitMiddleware,
 	)

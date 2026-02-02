@@ -46,8 +46,25 @@ export {
   default as analytics,
 } from "./use-analytics";
 
+// Event stream hooks (SSE)
+export {
+  useEventStream,
+  default as eventStream,
+} from "./use-event-stream";
+
 // Re-export types
 export type { UseDashboardOptions } from "./use-dashboard";
 export type { UseCampaignsOptions, UseCampaignOptions } from "./use-campaigns";
 export type { UseConnectionsOptions } from "./use-connections";
 export type { UseAnalyticsOptions } from "./use-analytics";
+export type {
+  UseEventStreamOptions,
+  SyncStatus,
+  ToastNotification,
+  EventType,
+  SyncStartedData,
+  SyncProgressData,
+  SyncCompletedData,
+  SyncErrorData,
+  DataUpdatedData,
+} from "./use-event-stream";
