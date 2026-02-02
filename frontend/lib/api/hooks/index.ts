@@ -52,6 +52,22 @@ export {
   default as eventStream,
 } from "./use-event-stream";
 
+// Admin hooks
+export {
+  useAdminDashboard,
+  useAdminMetrics,
+  useActiveUsers,
+  useChurnedUsers,
+  useFunnel,
+  usePlatformBreakdown,
+  useFeatureUsage,
+  useRevenue,
+  useEventBreakdown,
+  useCohortAnalysis,
+  useTopUsers,
+  adminKeys,
+} from "./use-admin";
+
 // Re-export types
 export type { UseDashboardOptions } from "./use-dashboard";
 export type { UseCampaignsOptions, UseCampaignOptions } from "./use-campaigns";
