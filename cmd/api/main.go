@@ -16,10 +16,13 @@ import (
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/cache"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/events"
+	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/persistence"
+	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/persistence/postgres"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/meta"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/shopee"
 	"github.com/ads-aggregator/ads-aggregator/internal/infrastructure/platform/tiktok"
+	"github.com/ads-aggregator/ads-aggregator/internal/usecase/auth"
 	"github.com/ads-aggregator/ads-aggregator/pkg/jwt"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -42,6 +45,14 @@ func main() {
 		Str("env", cfg.App.Env).
 		Int("port", cfg.App.Port).
 		Msg("Starting application")
+
+	// Initialize database
+	db, err := postgres.NewDatabase(&cfg.Database)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+	defer db.Close()
+	log.Info().Str("host", cfg.Database.Host).Msg("Database connected")
 
 	// Initialize platform connectors
 	connectorRegistry := initConnectors(cfg)
@@ -87,8 +98,44 @@ func main() {
 	broadcaster := events.NewBroadcaster()
 	log.Info().Msg("Event broadcaster initialized")
 
-	// Initialize handlers (with nil services for now - would be injected with DI)
-	authHandler := handler.NewAuthHandler(nil)
+	// Initialize repositories
+	userRepo := postgres.NewUserRepository(db)
+	orgRepo := postgres.NewOrganizationRepository(db)
+	orgMemberRepo := postgres.NewOrganizationMemberRepository(db)
+	connectedAccRepo := postgres.NewConnectedAccountRepository(db)
+	verificationTokenRepo := postgres.NewVerificationTokenRepository(db)
+
+	// Initialize state store for OAuth
+	stateStore := persistence.NewInMemoryStateStore(15 * time.Minute)
+
+	// Initialize auth service
+	frontendURL := os.Getenv("APP_URL")
+	if frontendURL == "" {
+		frontendURL = fmt.Sprintf("http://localhost:%d", cfg.App.Port)
+	}
+	emailConfig := auth.EmailConfig{
+		FrontendURL:             frontendURL,
+		EmailVerificationExpiry: 24 * time.Hour,
+		PasswordResetExpiry:     1 * time.Hour,
+		AppName:                 cfg.App.Name,
+		SupportEmail:            "support@example.com",
+	}
+	authService := auth.NewService(
+		userRepo,
+		orgRepo,
+		orgMemberRepo,
+		connectedAccRepo,
+		verificationTokenRepo,
+		jwtManager,
+		connectorRegistry,
+		stateStore,
+		nil, // emailSender - not required for local testing
+		emailConfig,
+	)
+	log.Info().Msg("Auth service initialized")
+
+	// Initialize handlers
+	authHandler := handler.NewAuthHandler(authService)
 	platformHandler := handler.NewPlatformHandler(nil, nil)
 	analyticsHandler := handler.NewAnalyticsHandler(nil, appCache)
 	eventsHandler := handler.NewEventsHandler(broadcaster)

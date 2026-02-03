@@ -31,9 +31,7 @@ const securityHeaders = [
   },
   {
     key: 'Content-Security-Policy',
-    value: process.env.NODE_ENV === 'production'
-      ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.facebook.com https://*.fbcdn.net https://*.tiktok.com https://*.shopee.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.facebook.com https://*.tiktok.com https://*.shopee.com; frame-src 'self' https://*.facebook.com https://*.tiktok.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
-      : "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.facebook.com https://*.tiktok.com https://*.shopee.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:*; frame-src 'self' https://*.facebook.com https://*.tiktok.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.facebook.com https://*.fbcdn.net https://*.tiktok.com https://*.shopee.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' ws://localhost:* wss://localhost:* http://localhost:* https://*.facebook.com https://*.tiktok.com https://*.shopee.com; frame-src 'self' https://*.facebook.com https://*.tiktok.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
   },
 ];
 

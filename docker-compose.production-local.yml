@@ -1,0 +1,279 @@
+# =============================================================================
+# Ads Analytics Platform - Production-Like Local Environment
+# For testing the full stack locally before deployment
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ===========================================================================
+  # Nginx Reverse Proxy (Production-like entry point)
+  # ===========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: ads-local-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/nginx-local.conf:/etc/nginx/nginx.conf:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      - ads-local-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================================================
+  # Go API Backend (Production Build)
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+      args:
+        VERSION: local-test
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    container_name: ads-local-api
+    restart: unless-stopped
+    expose:
+      - "8080"
+    env_file:
+      - .env.local
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=ads_local
+      - DB_USER=postgres
+      - DB_PASSWORD=localpassword123
+      - DB_SSL_MODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=localredis123
+      # Mock API URLs instead of real platforms
+      - META_API_URL=http://mock-api:9090/meta
+      - TIKTOK_API_URL=http://mock-api:9090/tiktok
+      - SHOPEE_API_URL=http://mock-api:9090/shopee
+      - USE_MOCK_API=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-api:
+        condition: service_healthy
+    networks:
+      - ads-local-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # ===========================================================================
+  # Worker Service (Production Build)
+  # ===========================================================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+      args:
+        VERSION: local-test
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    container_name: ads-local-worker
+    restart: unless-stopped
+    expose:
+      - "8081"
+    env_file:
+      - .env.local
+    environment:
+      - APP_ENV=production
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=ads_local
+      - DB_USER=postgres
+      - DB_PASSWORD=localpassword123
+      - DB_SSL_MODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=localredis123
+      - SCHEDULER_ENABLED=true
+      # Mock API URLs
+      - META_API_URL=http://mock-api:9090/meta
+      - TIKTOK_API_URL=http://mock-api:9090/tiktok
+      - SHOPEE_API_URL=http://mock-api:9090/shopee
+      - USE_MOCK_API=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ads-local-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # ===========================================================================
+  # Next.js Frontend (Production Build)
+  # ===========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/v1
+        NEXT_PUBLIC_APP_NAME: "Ads Analytics (Local)"
+        NEXT_PUBLIC_APP_VERSION: local-test
+    container_name: ads-local-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=/api/v1
+      - BACKEND_INTERNAL_URL=http://api:8080
+      - AUTH_TRUST_HOST=true
+      - NEXTAUTH_URL=http://localhost
+      - AUTH_URL=http://localhost
+      - AUTH_SECRET=local-dev-secret-key-min-32-chars-long
+      - NEXTAUTH_SECRET=local-dev-secret-key-min-32-chars-long
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ads-local-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ===========================================================================
+  # Mock Platform API Server
+  # ===========================================================================
+  mock-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-api
+    container_name: ads-local-mock-api
+    restart: unless-stopped
+    expose:
+      - "9090"
+    environment:
+      - MOCK_MODE=normal
+      - MOCK_DELAY_MS=0
+    networks:
+      - ads-local-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================================================
+  # PostgreSQL Database
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: ads-local-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    environment:
+      POSTGRES_DB: ads_local
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localpassword123
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-local-data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - ads-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ads_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ===========================================================================
+  # Redis Cache
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: ads-local-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+    command: redis-server --appendonly yes --requirepass localredis123
+    volumes:
+      - redis-local-data:/data
+    networks:
+      - ads-local-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "localredis123", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # Seed Data Runner (one-time job)
+  # ===========================================================================
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile.seed
+    container_name: ads-local-seed
+    env_file:
+      - .env.local
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=ads_local
+      - DB_USER=postgres
+      - DB_PASSWORD=localpassword123
+      - DB_SSL_MODE=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ads-local-network
+    profiles:
+      - seed  # Only run when explicitly called
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  ads-local-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes (Persistent data)
+# =============================================================================
+volumes:
+  postgres-local-data:
+    driver: local
+  redis-local-data:
+    driver: local
+  nginx-logs:
+    driver: local

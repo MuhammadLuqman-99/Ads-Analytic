@@ -71,8 +71,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         try {
           // Call backend API to authenticate
+          // Use internal Docker network URL for server-side calls
+          const apiUrl = process.env.BACKEND_INTERNAL_URL || "http://api:8080";
           const response = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/login`,
+            `${apiUrl}/api/v1/auth/login`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },

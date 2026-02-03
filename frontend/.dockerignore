@@ -22,6 +22,14 @@ dist
 # Testing
 coverage
 .nyc_output
+test/
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+vitest.config.ts
+playwright.config.ts
 
 # Git
 .git

@@ -143,8 +143,8 @@ type Organization struct {
 	LogoURL               string           `json:"logo_url,omitempty" gorm:"size:500"`
 	SubscriptionPlan      SubscriptionPlan `json:"subscription_plan" gorm:"type:subscription_plan;default:'free'"`
 	SubscriptionExpiresAt *time.Time       `json:"subscription_expires_at,omitempty"`
-	Settings              JSONMap          `json:"settings,omitempty" gorm:"type:jsonb;default:'{}'"`
-	Metadata              JSONMap          `json:"metadata,omitempty" gorm:"type:jsonb;default:'{}'"`
+	Settings              JSONMap          `json:"settings,omitempty" gorm:"type:jsonb;default:'{}';serializer:json"`
+	Metadata              JSONMap          `json:"metadata,omitempty" gorm:"type:jsonb;default:'{}';serializer:json"`
 	IsActive              bool             `json:"is_active" gorm:"default:true"`
 }
 
@@ -160,7 +160,7 @@ type User struct {
 	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
 	LastLoginAt     *time.Time `json:"last_login_at,omitempty"`
 	IsActive        bool       `json:"is_active" gorm:"default:true"`
-	Metadata        JSONMap    `json:"metadata,omitempty" gorm:"type:jsonb;default:'{}'"`
+	Metadata        JSONMap    `json:"metadata,omitempty" gorm:"type:jsonb;default:'{}';serializer:json"`
 }
 
 // FullName returns the user's full name

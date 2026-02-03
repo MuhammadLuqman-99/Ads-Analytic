@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Builder
 # -----------------------------------------------------------------------------
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
@@ -36,7 +36,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Build the worker
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}" \
-    -o /app/bin/worker ./cmd/worker 2>/dev/null || echo "Worker build skipped"
+    -o /app/bin/worker ./cmd/worker
 
 # -----------------------------------------------------------------------------
 # Stage 2: API Runtime
@@ -90,8 +90,8 @@ RUN addgroup -g 1000 appgroup && \
 # Set working directory
 WORKDIR /app
 
-# Copy binary from builder (if exists)
-COPY --from=builder /app/bin/worker /app/worker 2>/dev/null || true
+# Copy binary from builder
+COPY --from=builder /app/bin/worker /app/worker
 
 # Set ownership
 RUN chown -R appuser:appgroup /app

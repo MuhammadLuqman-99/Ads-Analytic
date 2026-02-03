@@ -65,21 +65,18 @@ export default function OnboardingPage() {
   const handleCompanyDetailsSubmit = async (data: CompanyDetailsFormData) => {
     setIsLoading(true);
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/organizations/onboarding`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          company_size: data.companySize,
-          industry: data.industry,
-          monthly_ad_spend: data.monthlyAdSpend,
-          primary_goal: data.primaryGoal,
-        }),
-      });
+      // Store in localStorage for now (backend endpoint not implemented yet)
+      localStorage.setItem("onboarding_company_details", JSON.stringify({
+        company_size: data.companySize,
+        industry: data.industry,
+        monthly_ad_spend: data.monthlyAdSpend,
+        primary_goal: data.primaryGoal,
+      }));
       setCurrentStep(1);
     } catch (error) {
       console.error("Failed to save company details:", error);
+      // Still proceed to next step
+      setCurrentStep(1);
     } finally {
       setIsLoading(false);
     }
@@ -105,9 +102,8 @@ export default function OnboardingPage() {
   const handleFinishOnboarding = async () => {
     setIsLoading(true);
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/organizations/onboarding/complete`, {
-        method: "POST",
-      });
+      // Mark onboarding as complete in localStorage
+      localStorage.setItem("onboarding_completed", "true");
       router.push("/dashboard");
     } catch (error) {
       console.error("Failed to complete onboarding:", error);

@@ -1,6 +1,6 @@
 module github.com/ads-aggregator/ads-aggregator
 
-go 1.25.5
+go 1.24.0
 
 require (
 	github.com/getsentry/sentry-go v0.42.0

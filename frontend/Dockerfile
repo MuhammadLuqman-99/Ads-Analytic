@@ -16,8 +16,8 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install all dependencies (including dev for build)
+RUN npm ci --legacy-peer-deps
 
 # -----------------------------------------------------------------------------
 # Stage 2: Builder

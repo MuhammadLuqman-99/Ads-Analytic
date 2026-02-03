@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
+import { signIn } from "next-auth/react";
 
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { SocialLoginButtons } from "@/components/auth/SocialLoginButtons";
@@ -13,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useAuthContext } from "@/components/providers/AuthProvider";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -25,11 +25,10 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 function LoginForm() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const { login } = useAuthContext();
 
   const {
     register,
@@ -53,18 +52,21 @@ function LoginForm() {
     setError(null);
 
     try {
-      await login(data.email, data.password);
-      // The AuthProvider will handle redirect to dashboard
-    } catch (err: unknown) {
-      // Handle API error response
-      if (err && typeof err === "object" && "message" in err) {
-        setError((err as { message: string }).message);
-      } else if (err && typeof err === "object" && "error" in err) {
-        const errorObj = (err as { error: { message?: string } }).error;
-        setError(errorObj?.message || "Invalid email or password. Please try again.");
-      } else {
-        setError("An unexpected error occurred. Please try again.");
+      const result = await signIn("credentials", {
+        email: data.email,
+        password: data.password,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        setError("Invalid email or password. Please try again.");
+      } else if (result?.ok) {
+        // Successful login - redirect to dashboard
+        router.push(callbackUrl);
+        router.refresh();
       }
+    } catch (err: unknown) {
+      setError("An unexpected error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }

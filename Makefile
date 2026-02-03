@@ -3,7 +3,9 @@
 # =============================================================================
 
 .PHONY: help build run test clean docker-build docker-up docker-down docker-logs \
-        dev deploy logs migrate ssl-init ssl-renew
+        dev deploy logs migrate ssl-init ssl-renew \
+        prod-local prod-local-down prod-local-logs prod-local-build \
+        seed reset mock-error mock-slow mock-normal test-flow
 
 # Variables
 APP_NAME := ads-aggregator
@@ -19,6 +21,7 @@ GOFLAGS := -ldflags "-w -s -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_
 DOCKER_COMPOSE := docker-compose
 DOCKER_COMPOSE_DEV := $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml
 DOCKER_COMPOSE_PROD := $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml
+DOCKER_COMPOSE_LOCAL := $(DOCKER_COMPOSE) -f docker-compose.production-local.yml
 
 # =============================================================================
 # Help
@@ -54,6 +57,17 @@ help:
 	@echo "  make docker-build   Build docker images"
 	@echo "  make docker-up      Start production stack"
 	@echo "  make docker-down    Stop production stack"
+	@echo ""
+	@echo "Production-Local Testing:"
+	@echo "  make prod-local     Build and start production-like local environment"
+	@echo "  make prod-local-down  Stop production-local environment"
+	@echo "  make prod-local-logs  Tail all production-local service logs"
+	@echo "  make seed           Seed database with test data"
+	@echo "  make reset          Drop database and reseed"
+	@echo "  make test-flow      Run smoke tests"
+	@echo "  make mock-error     Toggle mock API to return errors"
+	@echo "  make mock-slow      Toggle mock API to be slow (2-5s delay)"
+	@echo "  make mock-normal    Reset mock API to normal mode"
 	@echo ""
 	@echo "Database:"
 	@echo "  make migrate        Run database migrations"
@@ -377,3 +391,167 @@ nuke:
 	$(DOCKER_COMPOSE_PROD) down -v --rmi all
 	docker system prune -af
 	@echo "Cleanup complete!"
+
+# =============================================================================
+# Production-Like Local Environment
+# =============================================================================
+
+## Build and start production-like local environment
+prod-local:
+	@echo "Building and starting production-like local environment..."
+	@echo "This simulates the full production stack with mock platform APIs"
+	$(DOCKER_COMPOSE_LOCAL) build \
+		--build-arg VERSION=local-test \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT)
+	$(DOCKER_COMPOSE_LOCAL) up -d
+	@echo ""
+	@echo "Waiting for services to be healthy..."
+	@sleep 15
+	@echo ""
+	@echo "========================================="
+	@echo "Production-Local Environment Ready!"
+	@echo "========================================="
+	@echo ""
+	@echo "Access URLs:"
+	@echo "  Frontend:    http://localhost"
+	@echo "  API:         http://localhost/api/v1"
+	@echo "  Mock API:    http://localhost/mock-api"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Run 'make seed' to populate test data"
+	@echo "  2. Run 'make test-flow' to run smoke tests"
+	@echo ""
+	@$(DOCKER_COMPOSE_LOCAL) ps
+
+## Build production-local images only
+prod-local-build:
+	@echo "Building production-local images..."
+	$(DOCKER_COMPOSE_LOCAL) build \
+		--build-arg VERSION=local-test \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT)
+
+## Stop production-local environment
+prod-local-down:
+	@echo "Stopping production-local environment..."
+	$(DOCKER_COMPOSE_LOCAL) down
+
+## View production-local logs
+prod-local-logs:
+	$(DOCKER_COMPOSE_LOCAL) logs -f --tail=100
+
+## View specific service logs in prod-local
+prod-local-logs-api:
+	$(DOCKER_COMPOSE_LOCAL) logs -f api
+
+prod-local-logs-frontend:
+	$(DOCKER_COMPOSE_LOCAL) logs -f frontend
+
+prod-local-logs-nginx:
+	$(DOCKER_COMPOSE_LOCAL) logs -f nginx
+
+prod-local-logs-worker:
+	$(DOCKER_COMPOSE_LOCAL) logs -f worker
+
+prod-local-logs-mock:
+	$(DOCKER_COMPOSE_LOCAL) logs -f mock-api
+
+## Production-local status
+prod-local-status:
+	$(DOCKER_COMPOSE_LOCAL) ps
+	@echo ""
+	@echo "Service Health:"
+	@curl -s http://localhost/nginx-health 2>/dev/null && echo " - Nginx: UP" || echo " - Nginx: DOWN"
+	@curl -s http://localhost/health 2>/dev/null | grep -q "healthy" && echo " - API: UP" || echo " - API: DOWN"
+	@curl -s http://localhost/mock-api/health 2>/dev/null | grep -q "healthy" && echo " - Mock API: UP" || echo " - Mock API: DOWN"
+
+## Seed database with test data
+seed:
+	@echo "Seeding database with test data..."
+	$(DOCKER_COMPOSE_LOCAL) run --rm seed
+	@echo ""
+	@echo "Seed completed! Test accounts:"
+	@echo "  admin@test.com / password123 (Business plan, all platforms)"
+	@echo "  pro@test.com / password123 (Pro plan, Meta + TikTok)"
+	@echo "  free@test.com / password123 (Free plan, Meta only)"
+
+## Reset database and reseed
+reset:
+	@echo "WARNING: This will drop all data and reseed!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ]
+	@echo "Dropping database..."
+	$(DOCKER_COMPOSE_LOCAL) exec postgres psql -U postgres -d ads_local -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+	@echo "Re-running migrations..."
+	$(DOCKER_COMPOSE_LOCAL) restart api
+	@sleep 10
+	@echo "Reseeding data..."
+	$(DOCKER_COMPOSE_LOCAL) run --rm seed
+	@echo "Reset complete!"
+
+## Run smoke tests
+test-flow:
+	@echo "Running smoke tests..."
+	@chmod +x scripts/smoke-test.sh
+	@bash scripts/smoke-test.sh
+
+## Toggle mock API to error mode (all requests fail)
+mock-error:
+	@echo "Setting mock API to ERROR mode..."
+	@curl -s -X POST http://localhost/mock-api/control/mode \
+		-H "Content-Type: application/json" \
+		-d '{"mode":"error"}' | jq . 2>/dev/null || echo "Mock API mode set to error"
+
+## Toggle mock API to slow mode (2-5 second delays)
+mock-slow:
+	@echo "Setting mock API to SLOW mode..."
+	@curl -s -X POST http://localhost/mock-api/control/mode \
+		-H "Content-Type: application/json" \
+		-d '{"mode":"slow"}' | jq . 2>/dev/null || echo "Mock API mode set to slow"
+
+## Toggle mock API to rate limited mode
+mock-rate-limited:
+	@echo "Setting mock API to RATE LIMITED mode..."
+	@curl -s -X POST http://localhost/mock-api/control/mode \
+		-H "Content-Type: application/json" \
+		-d '{"mode":"rate_limited"}' | jq . 2>/dev/null || echo "Mock API mode set to rate_limited"
+
+## Toggle mock API to token expired mode
+mock-token-expired:
+	@echo "Setting mock API to TOKEN EXPIRED mode..."
+	@curl -s -X POST http://localhost/mock-api/control/mode \
+		-H "Content-Type: application/json" \
+		-d '{"mode":"token_expired"}' | jq . 2>/dev/null || echo "Mock API mode set to token_expired"
+
+## Reset mock API to normal mode
+mock-normal:
+	@echo "Resetting mock API to NORMAL mode..."
+	@curl -s -X POST http://localhost/mock-api/control/reset | jq . 2>/dev/null || echo "Mock API reset to normal"
+
+## Check mock API current mode
+mock-status:
+	@echo "Current mock API configuration:"
+	@curl -s http://localhost/mock-api/control/mode | jq . 2>/dev/null || echo "Could not get mock API status"
+
+## Shell into prod-local containers
+prod-local-shell-api:
+	$(DOCKER_COMPOSE_LOCAL) exec api sh
+
+prod-local-shell-postgres:
+	$(DOCKER_COMPOSE_LOCAL) exec postgres psql -U postgres -d ads_local
+
+prod-local-shell-redis:
+	$(DOCKER_COMPOSE_LOCAL) exec redis redis-cli -a localredis123
+
+## Clean up production-local environment (removes volumes)
+prod-local-clean:
+	@echo "Cleaning up production-local environment..."
+	$(DOCKER_COMPOSE_LOCAL) down -v
+	@echo "Cleanup complete!"
+
+## Full production-local nuke (removes everything including images)
+prod-local-nuke:
+	@echo "WARNING: This will remove all prod-local containers, volumes, and images!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ]
+	$(DOCKER_COMPOSE_LOCAL) down -v --rmi all
+	@echo "Nuke complete!"

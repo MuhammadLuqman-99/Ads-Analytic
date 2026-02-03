@@ -188,7 +188,7 @@ func (r *Router) setupProtectedRoutes(rg *gin.RouterGroup) {
 	{
 		connections.GET("", r.platformHandler.ListConnectedAccounts)
 		connections.GET("/platforms", r.getAvailablePlatforms)
-		connections.POST("/:platform/connect", r.platformHandler.GetAuthURL)
+		connections.POST("/connect/:platform", r.platformHandler.GetAuthURL)
 		connections.DELETE("/:id", r.platformHandler.DisconnectAccount)
 		connections.POST("/:id/sync", r.platformHandler.TriggerSync)
 		connections.GET("/:id/sync-status", r.platformHandler.GetSyncStatus)
@@ -261,7 +261,7 @@ func (r *Router) setupProtectedRoutes(rg *gin.RouterGroup) {
 	platforms := protected.Group("/platforms")
 	{
 		platforms.GET("", r.platformHandler.ListConnectedAccounts)
-		platforms.GET("/:platform/auth-url", r.platformHandler.GetAuthURL)
+		platforms.GET("/auth-url/:platform", r.platformHandler.GetAuthURL)
 		platforms.DELETE("/:accountId", r.platformHandler.DisconnectAccount)
 		platforms.POST("/:accountId/sync", r.platformHandler.TriggerSync)
 		platforms.GET("/:accountId/sync-status", r.platformHandler.GetSyncStatus)
