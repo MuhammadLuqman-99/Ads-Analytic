@@ -58,52 +58,75 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     }),
     Credentials({
-      name: "credentials",
+      id: "credentials",
+      name: "Email & Password",
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        const parsed = loginSchema.safeParse(credentials);
-        if (!parsed.success) {
+        console.log("[Auth] authorize called");
+
+        // Validate credentials
+        if (!credentials?.email || !credentials?.password) {
+          console.log("[Auth] Missing credentials");
+          return null;
+        }
+
+        const email = credentials.email as string;
+        const password = credentials.password as string;
+
+        // Validate format
+        if (password.length < 6) {
+          console.log("[Auth] Password too short");
           return null;
         }
 
         try {
           // Call backend API to authenticate
-          // Use internal Docker network URL for server-side calls
           const apiUrl = process.env.BACKEND_INTERNAL_URL || "http://api:8080";
+          console.log("[Auth] Calling API at:", apiUrl);
+
           const response = await fetch(
             `${apiUrl}/api/v1/auth/login`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                email: parsed.data.email,
-                password: parsed.data.password,
-              }),
+              body: JSON.stringify({ email, password }),
             }
           );
 
+          console.log("[Auth] API response status:", response.status);
+
           if (!response.ok) {
+            console.log("[Auth] API returned error");
             return null;
           }
 
           const json = await response.json();
-          const data = json.data;
+          console.log("[Auth] API success:", json.success);
 
-          return {
-            id: data.user.id,
-            email: data.user.email,
-            name: data.user.firstName && data.user.lastName
-              ? `${data.user.firstName} ${data.user.lastName}`
-              : data.user.email,
-            organizationId: data.organization?.id,
-            role: "admin", // Default role - backend doesn't return this yet
-            onboardingCompleted: true, // Skip onboarding for now
+          if (!json.success || !json.data?.user) {
+            console.log("[Auth] Invalid response structure");
+            return null;
+          }
+
+          const userData = json.data.user;
+          const orgData = json.data.organization;
+
+          const user = {
+            id: userData.id,
+            email: userData.email,
+            name: [userData.firstName, userData.lastName].filter(Boolean).join(" ") || userData.email,
+            organizationId: orgData?.id || null,
+            role: "admin",
+            onboardingCompleted: true,
           };
+
+          console.log("[Auth] Returning user:", user.id);
+          return user;
         } catch (error) {
-          console.error("Auth error:", error);
+          console.error("[Auth] Error:", error);
           return null;
         }
       },
