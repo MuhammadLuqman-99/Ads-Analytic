@@ -31,6 +31,9 @@ export function Header() {
             <a href="#faq" className="text-gray-600 hover:text-gray-900 transition-colors">
               FAQ
             </a>
+            <Link href="/docs" className="text-gray-600 hover:text-gray-900 transition-colors">
+              Dokumentasi
+            </Link>
           </div>
 
           {/* CTA Buttons */}
@@ -71,6 +74,7 @@ export function Header() {
               <a href="#features" className="text-gray-600 hover:text-gray-900">Ciri-ciri</a>
               <a href="#pricing" className="text-gray-600 hover:text-gray-900">Harga</a>
               <a href="#faq" className="text-gray-600 hover:text-gray-900">FAQ</a>
+              <Link href="/docs" className="text-gray-600 hover:text-gray-900">Dokumentasi</Link>
               <hr className="border-gray-100" />
               <Link href="/login" className="text-gray-600 hover:text-gray-900">Log Masuk</Link>
               <Link
