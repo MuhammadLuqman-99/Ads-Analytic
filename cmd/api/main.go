@@ -141,9 +141,10 @@ func main() {
 	eventsHandler := handler.NewEventsHandler(broadcaster)
 
 	// Initialize router
+	// Note: AllowedOrigins must be specific origins (not "*") when AllowCredentials is true
 	routerConfig := &router.Config{
 		Mode:           "release",
-		AllowedOrigins: []string{"*"},
+		AllowedOrigins: []string{"http://localhost", "http://localhost:80", "http://localhost:3000", "https://adsanalytic.com"},
 		RateLimitRPS:   cfg.RateLimit.Requests,
 	}
 	if cfg.IsDevelopment() {
