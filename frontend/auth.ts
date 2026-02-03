@@ -89,17 +89,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             return null;
           }
 
-          const data = await response.json();
+          const json = await response.json();
+          const data = json.data;
 
           return {
             id: data.user.id,
             email: data.user.email,
-            name: data.user.name || data.user.email,
-            organizationId: data.user.organization_id,
-            role: data.user.role,
-            onboardingCompleted: data.user.onboarding_completed,
-            accessToken: data.access_token,
-            refreshToken: data.refresh_token,
+            name: data.user.firstName && data.user.lastName
+              ? `${data.user.firstName} ${data.user.lastName}`
+              : data.user.email,
+            organizationId: data.organization?.id,
+            role: "admin", // Default role - backend doesn't return this yet
+            onboardingCompleted: true, // Skip onboarding for now
           };
         } catch (error) {
           console.error("Auth error:", error);
