@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Facebook, Music2, ShoppingBag, ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { MetaIcon, TikTokIcon, ShopeeIcon2 } from "@/components/icons";
 
 export const metadata = {
   title: "Documentation - AdsAnalytic",
@@ -11,21 +12,21 @@ const platforms = [
     title: "Meta (Facebook) Ads",
     description: "Connect your Facebook and Instagram ad accounts to track performance across Meta platforms.",
     href: "/docs/meta-ads",
-    icon: Facebook,
-    color: "bg-blue-500",
+    icon: MetaIcon,
+    color: "bg-blue-600",
   },
   {
     title: "TikTok Ads",
     description: "Link your TikTok Ads Manager to monitor your TikTok advertising campaigns.",
     href: "/docs/tiktok-ads",
-    icon: Music2,
-    color: "bg-slate-900",
+    icon: TikTokIcon,
+    color: "bg-black",
   },
   {
     title: "Shopee Ads",
     description: "Connect your Shopee Seller Center to track your Shopee advertising performance.",
     href: "/docs/shopee-ads",
-    icon: ShoppingBag,
+    icon: ShopeeIcon2,
     color: "bg-orange-500",
   },
 ];

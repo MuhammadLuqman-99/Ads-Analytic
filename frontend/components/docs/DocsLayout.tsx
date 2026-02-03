@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BookOpen, Facebook, Music2, ShoppingBag, ChevronRight, Home } from "lucide-react";
+import { BarChart3, BookOpen, ChevronRight, Home } from "lucide-react";
+import { MetaIcon, TikTokIcon, ShopeeIcon2 } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 interface DocsLayoutProps {
@@ -19,9 +20,9 @@ const navigation = [
   {
     title: "Platform Guides",
     items: [
-      { title: "Connect Meta Ads", href: "/docs/meta-ads", icon: Facebook },
-      { title: "Connect TikTok Ads", href: "/docs/tiktok-ads", icon: Music2 },
-      { title: "Connect Shopee Ads", href: "/docs/shopee-ads", icon: ShoppingBag },
+      { title: "Connect Meta Ads", href: "/docs/meta-ads", icon: MetaIcon },
+      { title: "Connect TikTok Ads", href: "/docs/tiktok-ads", icon: TikTokIcon },
+      { title: "Connect Shopee Ads", href: "/docs/shopee-ads", icon: ShopeeIcon2 },
     ],
   },
 ];
