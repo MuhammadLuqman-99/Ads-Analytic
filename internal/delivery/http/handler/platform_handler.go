@@ -24,6 +24,17 @@ func NewPlatformHandler(authService *auth.Service, syncService *syncUsecase.Serv
 
 // ListConnectedAccounts lists all connected platform accounts
 func (h *PlatformHandler) ListConnectedAccounts(c *gin.Context) {
+	// Return mock data if auth service is not available (local dev mode)
+	if h.authService == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    getMockConnections(),
+			"total":   3,
+			"mock":    true,
+		})
+		return
+	}
+
 	orgID, _ := middleware.GetOrgID(c)
 	accounts, err := h.authService.GetConnectedAccounts(c.Request.Context(), orgID)
 	if err != nil {
@@ -38,7 +49,7 @@ func (h *PlatformHandler) ListConnectedAccounts(c *gin.Context) {
 			"platform_account_name": acc.PlatformAccountName, "last_synced_at": acc.LastSyncedAt,
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"data": response, "total": len(response)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": response, "total": len(response)})
 }
 
 // GetAuthURL returns the OAuth authorization URL for a platform
@@ -110,3 +121,33 @@ func (h *PlatformHandler) GetAdAccount(c *gin.Context) {
 func (h *PlatformHandler) MetaWebhook(c *gin.Context)   { c.Status(http.StatusOK) }
 func (h *PlatformHandler) TikTokWebhook(c *gin.Context) { c.Status(http.StatusOK) }
 func (h *PlatformHandler) ShopeeWebhook(c *gin.Context) { c.Status(http.StatusOK) }
+
+// getMockConnections returns mock connected accounts for local testing
+func getMockConnections() []gin.H {
+	return []gin.H{
+		{
+			"id":                    "conn-meta-001",
+			"platform":              "meta",
+			"status":                "active",
+			"platform_account_name": "My Business Page",
+			"platform_account_id":   "123456789",
+			"last_synced_at":        "2026-02-03T02:30:00Z",
+		},
+		{
+			"id":                    "conn-tiktok-001",
+			"platform":              "tiktok",
+			"status":                "active",
+			"platform_account_name": "TikTok Ads Account",
+			"platform_account_id":   "987654321",
+			"last_synced_at":        "2026-02-03T02:15:00Z",
+		},
+		{
+			"id":                    "conn-shopee-001",
+			"platform":              "shopee",
+			"status":                "active",
+			"platform_account_name": "Shopee Seller Center",
+			"platform_account_id":   "456789123",
+			"last_synced_at":        "2026-02-03T02:00:00Z",
+		},
+	}
+}
