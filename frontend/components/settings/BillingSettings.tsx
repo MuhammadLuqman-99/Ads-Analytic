@@ -12,10 +12,13 @@ import {
   Trash2,
   AlertCircle,
   ArrowRight,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -138,6 +141,45 @@ export function BillingSettings() {
   const [paymentMethods, setPaymentMethods] = useState(mockPaymentMethods);
   const [invoices] = useState(mockInvoices);
   const [isChangingPlan, setIsChangingPlan] = useState(false);
+  const [showAddCardModal, setShowAddCardModal] = useState(false);
+  const [isAddingCard, setIsAddingCard] = useState(false);
+  const [newCard, setNewCard] = useState({
+    cardNumber: "",
+    expiry: "",
+    cvc: "",
+    name: "",
+  });
+
+  const handleAddCard = async () => {
+    if (!newCard.cardNumber || !newCard.expiry || !newCard.cvc || !newCard.name) {
+      alert("Please fill in all card details");
+      return;
+    }
+
+    setIsAddingCard(true);
+    // Simulate API call
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // Add new card to list
+    const last4 = newCard.cardNumber.slice(-4);
+    const cardType = newCard.cardNumber.startsWith("4") ? "visa" :
+                     newCard.cardNumber.startsWith("5") ? "mastercard" : "amex";
+
+    setPaymentMethods((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        type: cardType,
+        last4,
+        expiry: newCard.expiry,
+        isDefault: prev.length === 0,
+      },
+    ]);
+
+    setNewCard({ cardNumber: "", expiry: "", cvc: "", name: "" });
+    setShowAddCardModal(false);
+    setIsAddingCard(false);
+  };
 
   const handleUpgrade = async (plan: Plan) => {
     setIsChangingPlan(true);
@@ -333,7 +375,7 @@ export function BillingSettings() {
                 Manage your payment methods for billing
               </CardDescription>
             </div>
-            <Button variant="outline">
+            <Button variant="outline" onClick={() => setShowAddCardModal(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Add Card
             </Button>
@@ -460,6 +502,104 @@ export function BillingSettings() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Add Card Modal */}
+      {showAddCardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowAddCardModal(false)}
+          />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md p-6 m-4">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-slate-900">Add Payment Method</h2>
+              <button
+                onClick={() => setShowAddCardModal(false)}
+                className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="cardName">Cardholder Name</Label>
+                <Input
+                  id="cardName"
+                  placeholder="John Doe"
+                  value={newCard.name}
+                  onChange={(e) => setNewCard({ ...newCard, name: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="cardNumber">Card Number</Label>
+                <Input
+                  id="cardNumber"
+                  placeholder="4242 4242 4242 4242"
+                  value={newCard.cardNumber}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, "").slice(0, 16);
+                    setNewCard({ ...newCard, cardNumber: value });
+                  }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="expiry">Expiry Date</Label>
+                  <Input
+                    id="expiry"
+                    placeholder="MM/YY"
+                    value={newCard.expiry}
+                    onChange={(e) => {
+                      let value = e.target.value.replace(/\D/g, "").slice(0, 4);
+                      if (value.length >= 2) {
+                        value = value.slice(0, 2) + "/" + value.slice(2);
+                      }
+                      setNewCard({ ...newCard, expiry: value });
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="cvc">CVC</Label>
+                  <Input
+                    id="cvc"
+                    placeholder="123"
+                    value={newCard.cvc}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, "").slice(0, 4);
+                      setNewCard({ ...newCard, cvc: value });
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-2 text-sm text-slate-600">
+                <AlertCircle className="h-4 w-4 text-slate-400" />
+                Your card information is securely encrypted
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowAddCardModal(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={handleAddCard}
+                  disabled={isAddingCard}
+                >
+                  {isAddingCard ? "Adding..." : "Add Card"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
