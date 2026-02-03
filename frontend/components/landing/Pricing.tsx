@@ -1,71 +1,7 @@
 import Link from "next/link";
+import { plans, formatPrice, getPlanFeatures, getPlanLimitations } from "@/lib/pricing";
 
 export function Pricing() {
-  const plans = [
-    {
-      name: "Percuma",
-      price: "RM 0",
-      period: "selamanya",
-      description: "Untuk peniaga yang baru bermula",
-      features: [
-        "1 platform connection",
-        "Dashboard asas",
-        "7 hari data history",
-        "Export CSV",
-        "Email support",
-      ],
-      limitations: [
-        "Tiada cross-platform analytics",
-        "Tiada auto-sync",
-      ],
-      cta: "Mula Percuma",
-      ctaLink: "/register",
-      popular: false,
-    },
-    {
-      name: "Pro",
-      price: "RM 99",
-      period: "/bulan",
-      description: "Untuk peniaga yang serius grow bisnes",
-      features: [
-        "3 platform connections",
-        "Cross-platform ROAS",
-        "30 hari data history",
-        "Auto-sync setiap jam",
-        "Export PDF & Excel",
-        "Priority support",
-        "Custom dashboard",
-        "Team collaboration (3 users)",
-      ],
-      limitations: [],
-      cta: "Cuba 14 Hari Percuma",
-      ctaLink: "/register?plan=pro",
-      popular: true,
-    },
-    {
-      name: "Business",
-      price: "RM 299",
-      period: "/bulan",
-      description: "Untuk agency dan bisnes enterprise",
-      features: [
-        "Unlimited platform connections",
-        "Unlimited data history",
-        "Real-time sync",
-        "White-label reports",
-        "API access",
-        "Dedicated account manager",
-        "Custom integrations",
-        "Unlimited team members",
-        "SSO authentication",
-        "SLA guarantee",
-      ],
-      limitations: [],
-      cta: "Hubungi Kami",
-      ctaLink: "/contact",
-      popular: false,
-    },
-  ];
-
   return (
     <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-white">
       <div className="max-w-7xl mx-auto">
@@ -82,95 +18,100 @@ export function Pricing() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-          {plans.map((plan, index) => (
-            <div
-              key={index}
-              className={`relative rounded-2xl p-8 ${
-                plan.popular
-                  ? "bg-gradient-to-b from-blue-600 to-purple-600 text-white shadow-2xl shadow-blue-500/25 scale-105 z-10"
-                  : "bg-white border border-gray-200"
-              }`}
-            >
-              {/* Popular badge */}
-              {plan.popular && (
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                  <span className="bg-gradient-to-r from-yellow-400 to-orange-400 text-gray-900 text-sm font-bold px-4 py-1 rounded-full shadow-lg">
-                    Paling Popular
-                  </span>
-                </div>
-              )}
+          {plans.map((plan) => {
+            const features = getPlanFeatures(plan.id);
+            const limitations = getPlanLimitations(plan.id);
 
-              {/* Plan header */}
-              <div className="text-center mb-8">
-                <h3 className={`text-xl font-semibold mb-2 ${plan.popular ? "text-white" : "text-gray-900"}`}>
-                  {plan.name}
-                </h3>
-                <div className="flex items-baseline justify-center gap-1">
-                  <span className={`text-4xl font-bold ${plan.popular ? "text-white" : "text-gray-900"}`}>
-                    {plan.price}
-                  </span>
-                  <span className={plan.popular ? "text-blue-200" : "text-gray-500"}>
-                    {plan.period}
-                  </span>
-                </div>
-                <p className={`mt-2 text-sm ${plan.popular ? "text-blue-200" : "text-gray-500"}`}>
-                  {plan.description}
-                </p>
-              </div>
-
-              {/* Features */}
-              <ul className="space-y-4 mb-8">
-                {plan.features.map((feature, i) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <svg
-                      className={`w-5 h-5 flex-shrink-0 ${plan.popular ? "text-green-300" : "text-green-500"}`}
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className={plan.popular ? "text-white" : "text-gray-700"}>
-                      {feature}
-                    </span>
-                  </li>
-                ))}
-                {plan.limitations.map((limitation, i) => (
-                  <li key={`limit-${i}`} className="flex items-start gap-3">
-                    <svg
-                      className={`w-5 h-5 flex-shrink-0 ${plan.popular ? "text-red-300" : "text-gray-400"}`}
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className={plan.popular ? "text-blue-200" : "text-gray-400"}>
-                      {limitation}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-
-              {/* CTA */}
-              <Link
-                href={plan.ctaLink}
-                className={`block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all ${
+            return (
+              <div
+                key={plan.id}
+                className={`relative rounded-2xl p-8 ${
                   plan.popular
-                    ? "bg-white text-blue-600 hover:bg-gray-100"
-                    : "bg-gray-900 text-white hover:bg-gray-800"
+                    ? "bg-gradient-to-b from-blue-600 to-purple-600 text-white shadow-2xl shadow-blue-500/25 scale-105 z-10"
+                    : "bg-white border border-gray-200"
                 }`}
               >
-                {plan.cta}
-              </Link>
-            </div>
-          ))}
+                {/* Popular badge */}
+                {plan.popular && (
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2">
+                    <span className="bg-gradient-to-r from-yellow-400 to-orange-400 text-gray-900 text-sm font-bold px-4 py-1 rounded-full shadow-lg">
+                      Paling Popular
+                    </span>
+                  </div>
+                )}
+
+                {/* Plan header */}
+                <div className="text-center mb-8">
+                  <h3 className={`text-xl font-semibold mb-2 ${plan.popular ? "text-white" : "text-gray-900"}`}>
+                    {plan.nameMs}
+                  </h3>
+                  <div className="flex items-baseline justify-center gap-1">
+                    <span className={`text-4xl font-bold ${plan.popular ? "text-white" : "text-gray-900"}`}>
+                      {formatPrice(plan.price)}
+                    </span>
+                    <span className={plan.popular ? "text-blue-200" : "text-gray-500"}>
+                      {plan.price === 0 ? plan.periodMs : `/${plan.periodMs}`}
+                    </span>
+                  </div>
+                  <p className={`mt-2 text-sm ${plan.popular ? "text-blue-200" : "text-gray-500"}`}>
+                    {plan.descriptionMs}
+                  </p>
+                </div>
+
+                {/* Features */}
+                <ul className="space-y-4 mb-8">
+                  {features.map((feature, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <svg
+                        className={`w-5 h-5 flex-shrink-0 ${plan.popular ? "text-green-300" : "text-green-500"}`}
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span className={plan.popular ? "text-white" : "text-gray-700"}>
+                        {feature}
+                      </span>
+                    </li>
+                  ))}
+                  {limitations.map((limitation, i) => (
+                    <li key={`limit-${i}`} className="flex items-start gap-3">
+                      <svg
+                        className={`w-5 h-5 flex-shrink-0 ${plan.popular ? "text-red-300" : "text-gray-400"}`}
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span className={plan.popular ? "text-blue-200" : "text-gray-400"}>
+                        {limitation}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* CTA */}
+                <Link
+                  href={plan.ctaLink}
+                  className={`block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all ${
+                    plan.popular
+                      ? "bg-white text-blue-600 hover:bg-gray-100"
+                      : "bg-gray-900 text-white hover:bg-gray-800"
+                  }`}
+                >
+                  {plan.ctaTextMs}
+                </Link>
+              </div>
+            );
+          })}
         </div>
 
         {/* Guarantee */}

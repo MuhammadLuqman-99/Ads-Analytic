@@ -28,18 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-
-type Plan = "free" | "pro" | "business";
-
-interface PlanDetails {
-  name: string;
-  price: number;
-  period: string;
-  accounts: number;
-  apiCalls: string;
-  features: string[];
-  popular?: boolean;
-}
+import { plans, PlanId, formatPrice, getPlanById, getPlanFeatures, planLimits } from "@/lib/pricing";
 
 interface UsageStats {
   accounts: { used: number; limit: number };
@@ -63,70 +52,20 @@ interface Invoice {
   description: string;
 }
 
-const plans: Record<Plan, PlanDetails> = {
-  free: {
-    name: "Free",
-    price: 0,
-    period: "forever",
-    accounts: 2,
-    apiCalls: "1,000/month",
-    features: [
-      "2 ad accounts",
-      "Basic analytics",
-      "7-day data retention",
-      "Email support",
-    ],
-  },
-  pro: {
-    name: "Pro",
-    price: 29,
-    period: "month",
-    accounts: 5,
-    apiCalls: "10,000/month",
-    features: [
-      "5 ad accounts",
-      "Advanced analytics",
-      "30-day data retention",
-      "Priority support",
-      "Custom reports",
-      "Team collaboration",
-    ],
-    popular: true,
-  },
-  business: {
-    name: "Business",
-    price: 99,
-    period: "month",
-    accounts: 20,
-    apiCalls: "Unlimited",
-    features: [
-      "20 ad accounts",
-      "Enterprise analytics",
-      "Unlimited data retention",
-      "Dedicated support",
-      "API access",
-      "White-label options",
-      "SSO integration",
-    ],
-  },
-};
-
-const mockUsageStats: UsageStats = {
-  accounts: { used: 3, limit: 5 },
-  apiCalls: { used: 7500, limit: 10000 },
-  storage: { used: 2.5, limit: 10 },
-};
-
 const mockPaymentMethods: PaymentMethod[] = [
   { id: "1", type: "visa", last4: "4242", expiry: "12/25", isDefault: true },
   { id: "2", type: "mastercard", last4: "8888", expiry: "06/24", isDefault: false },
 ];
 
+// Get the current plan to set invoice amounts
+const currentPlanData = getPlanById("pro");
+const invoiceAmount = currentPlanData?.price || 99;
+
 const mockInvoices: Invoice[] = [
-  { id: "INV-001", date: new Date(2024, 0, 1), amount: 29, status: "paid", description: "Pro Plan - January 2024" },
-  { id: "INV-002", date: new Date(2023, 11, 1), amount: 29, status: "paid", description: "Pro Plan - December 2023" },
-  { id: "INV-003", date: new Date(2023, 10, 1), amount: 29, status: "paid", description: "Pro Plan - November 2023" },
-  { id: "INV-004", date: new Date(2023, 9, 1), amount: 29, status: "paid", description: "Pro Plan - October 2023" },
+  { id: "INV-001", date: new Date(2024, 0, 1), amount: invoiceAmount, status: "paid", description: "Pro Plan - January 2024" },
+  { id: "INV-002", date: new Date(2023, 11, 1), amount: invoiceAmount, status: "paid", description: "Pro Plan - December 2023" },
+  { id: "INV-003", date: new Date(2023, 10, 1), amount: invoiceAmount, status: "paid", description: "Pro Plan - November 2023" },
+  { id: "INV-004", date: new Date(2023, 9, 1), amount: invoiceAmount, status: "paid", description: "Pro Plan - October 2023" },
 ];
 
 const cardIcons: Record<string, string> = {
@@ -136,8 +75,15 @@ const cardIcons: Record<string, string> = {
 };
 
 export function BillingSettings() {
-  const [currentPlan] = useState<Plan>("pro");
-  const [usageStats] = useState(mockUsageStats);
+  const [currentPlanId] = useState<PlanId>("pro");
+  const currentPlan = getPlanById(currentPlanId);
+  const limits = planLimits[currentPlanId];
+
+  const [usageStats] = useState<UsageStats>({
+    accounts: { used: 2, limit: limits.accounts },
+    apiCalls: { used: 7500, limit: limits.apiCalls },
+    storage: { used: 2.5, limit: limits.storage },
+  });
   const [paymentMethods, setPaymentMethods] = useState(mockPaymentMethods);
   const [invoices] = useState(mockInvoices);
   const [isChangingPlan, setIsChangingPlan] = useState(false);
@@ -181,10 +127,10 @@ export function BillingSettings() {
     setIsAddingCard(false);
   };
 
-  const handleUpgrade = async (plan: Plan) => {
+  const handleUpgrade = async (planId: PlanId) => {
     setIsChangingPlan(true);
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    console.log("Upgrading to:", plan);
+    console.log("Upgrading to:", planId);
     setIsChangingPlan(false);
   };
 
@@ -212,20 +158,22 @@ export function BillingSettings() {
                 Current Plan
               </CardTitle>
               <CardDescription>
-                You are currently on the {plans[currentPlan].name} plan
+                You are currently on the {currentPlan?.name} plan
               </CardDescription>
             </div>
             <Badge className="bg-blue-100 text-blue-700 text-lg px-4 py-1">
-              {plans[currentPlan].name}
+              {currentPlan?.name}
             </Badge>
           </div>
         </CardHeader>
         <CardContent>
           <div className="flex items-baseline gap-2 mb-6">
             <span className="text-4xl font-bold text-slate-900">
-              ${plans[currentPlan].price}
+              {formatPrice(currentPlan?.price || 0)}
             </span>
-            <span className="text-slate-500">/{plans[currentPlan].period}</span>
+            <span className="text-slate-500">
+              {currentPlan?.price === 0 ? currentPlan?.period : `/${currentPlan?.period}`}
+            </span>
           </div>
 
           {/* Usage Stats */}
@@ -297,13 +245,13 @@ export function BillingSettings() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {(Object.keys(plans) as Plan[]).map((planKey) => {
-              const plan = plans[planKey];
-              const isCurrent = planKey === currentPlan;
+            {plans.map((plan) => {
+              const isCurrent = plan.id === currentPlanId;
+              const features = getPlanFeatures(plan.id);
 
               return (
                 <div
-                  key={planKey}
+                  key={plan.id}
                   className={cn(
                     "relative p-6 rounded-xl border-2 transition-all",
                     isCurrent
@@ -322,14 +270,16 @@ export function BillingSettings() {
                     <h3 className="text-xl font-bold text-slate-900">{plan.name}</h3>
                     <div className="mt-2">
                       <span className="text-3xl font-bold text-slate-900">
-                        ${plan.price}
+                        {formatPrice(plan.price)}
                       </span>
-                      <span className="text-slate-500">/{plan.period}</span>
+                      <span className="text-slate-500">
+                        {plan.price === 0 ? plan.period : `/${plan.period}`}
+                      </span>
                     </div>
                   </div>
 
                   <ul className="space-y-3 mb-6">
-                    {plan.features.map((feature, index) => (
+                    {features.map((feature, index) => (
                       <li key={index} className="flex items-center gap-2">
                         <Check className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                         <span className="text-sm text-slate-600">{feature}</span>
@@ -341,14 +291,14 @@ export function BillingSettings() {
                     <Button className="w-full" disabled>
                       Current Plan
                     </Button>
-                  ) : planKey === "free" && currentPlan !== "free" ? (
+                  ) : plan.id === "free" && currentPlanId !== "free" ? (
                     <Button variant="outline" className="w-full">
                       Downgrade
                     </Button>
                   ) : (
                     <Button
                       className="w-full"
-                      onClick={() => handleUpgrade(planKey)}
+                      onClick={() => handleUpgrade(plan.id)}
                       disabled={isChangingPlan}
                     >
                       {isChangingPlan ? "Processing..." : "Upgrade"}
