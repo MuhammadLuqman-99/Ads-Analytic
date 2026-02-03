@@ -30,7 +30,11 @@ type AuthHandler struct {
 // NewAuthHandler creates a new auth handler
 func NewAuthHandler(authService *auth.Service) *AuthHandler {
 	// Determine cookie settings from environment
+	// SECURE_COOKIES can override the default behavior based on APP_ENV
 	secureCookie := os.Getenv("APP_ENV") == "production"
+	if secureEnv := os.Getenv("SECURE_COOKIES"); secureEnv != "" {
+		secureCookie = secureEnv == "true"
+	}
 	cookieDomain := os.Getenv("COOKIE_DOMAIN")
 	if cookieDomain == "" {
 		cookieDomain = "localhost"

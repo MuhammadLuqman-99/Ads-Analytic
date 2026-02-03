@@ -66,6 +66,8 @@ services:
       - TIKTOK_API_URL=http://mock-api:9090/tiktok
       - SHOPEE_API_URL=http://mock-api:9090/shopee
       - USE_MOCK_API=true
+      # Disable secure cookies for local HTTP testing
+      - SECURE_COOKIES=false
     depends_on:
       postgres:
         condition: service_healthy
