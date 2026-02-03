@@ -31,7 +31,7 @@ export function AppShell({ children }: AppShellProps) {
       try {
         // Fetch organizations from API
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/v1/organizations`,
+          `${process.env.NEXT_PUBLIC_API_URL}/organizations`,
           {
             credentials: "include",
           }

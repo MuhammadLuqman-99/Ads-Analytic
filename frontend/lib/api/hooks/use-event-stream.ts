@@ -269,8 +269,8 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
       eventSourceRef.current.close();
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-    const url = `${baseUrl}/api/v1/events/stream`;
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
+    const url = `${baseUrl}/events/stream`;
 
     try {
       const eventSource = new EventSource(url, { withCredentials: true });
