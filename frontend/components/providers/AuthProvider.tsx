@@ -188,20 +188,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => clearInterval(interval);
   }, [state.isAuthenticated, refreshSession]);
 
-  // Redirect logic
-  useEffect(() => {
-    if (state.isLoading) return;
-
-    const isPublicPath = PUBLIC_PATHS.some((path) => pathname?.startsWith(path));
-
-    if (!state.isAuthenticated && !isPublicPath) {
-      // Not authenticated and trying to access protected route
-      router.push("/login");
-    } else if (state.isAuthenticated && isPublicPath) {
-      // Authenticated but on public route (login page, etc.)
-      router.push("/dashboard");
-    }
-  }, [state.isAuthenticated, state.isLoading, pathname, router]);
+  // Note: Redirect logic is handled by NextAuth middleware (middleware.ts)
+  // The AuthProvider only manages backend API auth state via cookies
+  // Do NOT add redirect logic here as it conflicts with NextAuth middleware
 
   // Memoize context value
   const contextValue = useMemo<AuthContextType>(
