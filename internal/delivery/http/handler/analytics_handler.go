@@ -172,6 +172,17 @@ func (h *AnalyticsHandler) GetDashboard(c *gin.Context) {
 
 	dateRange := parseDateRangeFromQuery(c)
 
+	// Return mock data if analytics service is not available (local dev mode)
+	if h.analyticsService == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    getMockDashboardMetrics(),
+			"cached":  false,
+			"mock":    true,
+		})
+		return
+	}
+
 	// Generate cache key
 	cacheKey := cache.DashboardCacheKey(orgID, dateRange.StartDate, dateRange.EndDate)
 
@@ -226,6 +237,16 @@ func (h *AnalyticsHandler) GetOverview(c *gin.Context) {
 
 // GetPlatformComparison returns platform comparison
 func (h *AnalyticsHandler) GetPlatformComparison(c *gin.Context) {
+	// Return mock data if analytics service is not available
+	if h.analyticsService == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    getMockPlatformData(),
+			"mock":    true,
+		})
+		return
+	}
+
 	orgID, _ := middleware.GetOrgID(c)
 	dateRange := parseDateRangeFromQuery(c)
 
@@ -235,7 +256,7 @@ func (h *AnalyticsHandler) GetPlatformComparison(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": report.ByPlatform})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": report.ByPlatform})
 }
 
 // TimeSeriesResponse represents the time series API response format
@@ -257,6 +278,16 @@ type TotalsResponse struct {
 
 // GetTrends returns metric trends (time series data)
 func (h *AnalyticsHandler) GetTrends(c *gin.Context) {
+	// Return mock data if analytics service is not available
+	if h.analyticsService == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    getMockTimeseriesData(),
+			"mock":    true,
+		})
+		return
+	}
+
 	orgID, ok := middleware.GetOrgID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Organization not found in context"})
@@ -324,6 +355,20 @@ type CampaignPerformanceResponse struct {
 
 // GetTopPerformers returns top performing campaigns
 func (h *AnalyticsHandler) GetTopPerformers(c *gin.Context) {
+	// Return mock data if analytics service is not available
+	if h.analyticsService == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"campaigns": getMockTopCampaigns(),
+				"metric":    c.DefaultQuery("metric", "roas"),
+				"limit":     5,
+			},
+			"mock": true,
+		})
+		return
+	}
+
 	orgID, ok := middleware.GetOrgID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Organization not found in context"})
@@ -542,4 +587,147 @@ func parseDateRange(c *gin.Context) entity.DateRange {
 func parseUUIDParam(c *gin.Context, param string) (uuid.UUID, error) {
 	id := c.Param(param)
 	return uuid.Parse(id)
+}
+
+// ============================================================================
+// Mock data functions for local development/testing
+// ============================================================================
+
+// getMockDashboardMetrics returns mock dashboard data for local testing
+func getMockDashboardMetrics() gin.H {
+	return gin.H{
+		"totals": gin.H{
+			"spend":       12500.00,
+			"revenue":     45000.00,
+			"roas":        3.6,
+			"conversions": 1250,
+			"clicks":      25000,
+			"impressions": 500000,
+			"ctr":         5.0,
+			"cpc":         0.50,
+			"cpa":         10.00,
+		},
+		"changes": gin.H{
+			"spend":       12.5,
+			"revenue":     18.3,
+			"roas":        5.2,
+			"conversions": 15.0,
+		},
+		"activeCampaigns": 12,
+		"lastSyncedAt":    time.Now().Add(-30 * time.Minute).Format(time.RFC3339),
+	}
+}
+
+// getMockPlatformData returns mock platform comparison data
+func getMockPlatformData() []gin.H {
+	return []gin.H{
+		{
+			"platform":    "meta",
+			"spend":       5000.00,
+			"revenue":     18000.00,
+			"roas":        3.6,
+			"conversions": 500,
+			"impressions": 200000,
+			"clicks":      10000,
+			"ctr":         5.0,
+		},
+		{
+			"platform":    "tiktok",
+			"spend":       4500.00,
+			"revenue":     16200.00,
+			"roas":        3.6,
+			"conversions": 450,
+			"impressions": 180000,
+			"clicks":      9000,
+			"ctr":         5.0,
+		},
+		{
+			"platform":    "shopee",
+			"spend":       3000.00,
+			"revenue":     10800.00,
+			"roas":        3.6,
+			"conversions": 300,
+			"impressions": 120000,
+			"clicks":      6000,
+			"ctr":         5.0,
+		},
+	}
+}
+
+// getMockTimeseriesData returns mock timeseries data
+func getMockTimeseriesData() []gin.H {
+	data := make([]gin.H, 0, 30)
+	baseSpend := 400.0
+	baseRevenue := 1500.0
+
+	for i := 29; i >= 0; i-- {
+		date := time.Now().AddDate(0, 0, -i)
+		// Add some variation
+		multiplier := 1.0 + (float64(i%7) * 0.1)
+		data = append(data, gin.H{
+			"date":        date.Format("2006-01-02"),
+			"spend":       baseSpend * multiplier,
+			"revenue":     baseRevenue * multiplier,
+			"conversions": int(40 * multiplier),
+			"clicks":      int(800 * multiplier),
+			"impressions": int(16000 * multiplier),
+		})
+	}
+	return data
+}
+
+// getMockTopCampaigns returns mock top campaigns data
+func getMockTopCampaigns() []gin.H {
+	return []gin.H{
+		{
+			"id":          "camp-001",
+			"name":        "Summer Sale 2026",
+			"platform":    "meta",
+			"status":      "active",
+			"spend":       2500.00,
+			"revenue":     10000.00,
+			"roas":        4.0,
+			"conversions": 250,
+		},
+		{
+			"id":          "camp-002",
+			"name":        "Brand Awareness",
+			"platform":    "tiktok",
+			"status":      "active",
+			"spend":       2000.00,
+			"revenue":     7200.00,
+			"roas":        3.6,
+			"conversions": 180,
+		},
+		{
+			"id":          "camp-003",
+			"name":        "Product Launch",
+			"platform":    "shopee",
+			"status":      "active",
+			"spend":       1500.00,
+			"revenue":     6000.00,
+			"roas":        4.0,
+			"conversions": 150,
+		},
+		{
+			"id":          "camp-004",
+			"name":        "Retargeting",
+			"platform":    "meta",
+			"status":      "active",
+			"spend":       1000.00,
+			"revenue":     4500.00,
+			"roas":        4.5,
+			"conversions": 100,
+		},
+		{
+			"id":          "camp-005",
+			"name":        "Flash Sale",
+			"platform":    "shopee",
+			"status":      "active",
+			"spend":       800.00,
+			"revenue":     2800.00,
+			"roas":        3.5,
+			"conversions": 80,
+		},
+	}
 }
