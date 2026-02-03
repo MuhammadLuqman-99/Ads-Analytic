@@ -35,10 +35,9 @@ func NewAuthHandler(authService *auth.Service) *AuthHandler {
 	if secureEnv := os.Getenv("SECURE_COOKIES"); secureEnv != "" {
 		secureCookie = secureEnv == "true"
 	}
+	// For localhost, use empty domain so cookies are sent correctly
+	// In production, set COOKIE_DOMAIN to your actual domain
 	cookieDomain := os.Getenv("COOKIE_DOMAIN")
-	if cookieDomain == "" {
-		cookieDomain = "localhost"
-	}
 
 	return &AuthHandler{
 		authService:  authService,
