@@ -9,6 +9,7 @@ import (
 	"github.com/ads-aggregator/ads-aggregator/internal/domain/entity"
 	"github.com/ads-aggregator/ads-aggregator/internal/usecase/auth"
 	"github.com/ads-aggregator/ads-aggregator/pkg/errors"
+	"github.com/ads-aggregator/ads-aggregator/pkg/jwt"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -478,8 +479,20 @@ func (h *AuthHandler) setAuthCookies(c *gin.Context, tokens interface{}) {
 			tp.AccessTokenExpiresAt = t.Tokens.AccessTokenExpiresAt
 			tp.RefreshTokenExpiresAt = t.Tokens.RefreshTokenExpiresAt
 		}
+	case *jwt.TokenPair:
+		if t != nil {
+			tp.AccessToken = t.AccessToken
+			tp.RefreshToken = t.RefreshToken
+			tp.AccessTokenExpiresAt = t.AccessTokenExpiresAt
+			tp.RefreshTokenExpiresAt = t.RefreshTokenExpiresAt
+		}
 	default:
-		// Try to use reflection or type assertion for jwt.TokenPair
+		// Unknown token type
+		return
+	}
+
+	// Don't set empty cookies
+	if tp.AccessToken == "" {
 		return
 	}
 
