@@ -52,6 +52,25 @@ function LoginForm() {
     setError(null);
 
     try {
+      // Step 1: Call backend API directly to set auth cookies
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
+      const backendResponse = await fetch(`${apiUrl}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include", // Important: includes cookies
+        body: JSON.stringify({
+          email: data.email,
+          password: data.password,
+        }),
+      });
+
+      if (!backendResponse.ok) {
+        const errorData = await backendResponse.json().catch(() => ({}));
+        setError(errorData?.error?.message || "Invalid email or password. Please try again.");
+        return;
+      }
+
+      // Step 2: Also create NextAuth session for middleware
       const result = await signIn("credentials", {
         email: data.email,
         password: data.password,
@@ -59,12 +78,13 @@ function LoginForm() {
       });
 
       if (result?.error) {
-        setError("Invalid email or password. Please try again.");
-      } else if (result?.ok) {
-        // Successful login - redirect to dashboard
-        router.push(callbackUrl);
-        router.refresh();
+        // Backend succeeded but NextAuth failed - still redirect since we have backend cookies
+        console.warn("NextAuth session creation failed, but backend auth succeeded");
       }
+
+      // Successful login - redirect to dashboard
+      router.push(callbackUrl);
+      router.refresh();
     } catch (err: unknown) {
       setError("An unexpected error occurred. Please try again.");
     } finally {
