@@ -5,12 +5,24 @@ import { usePathname } from "next/navigation";
 import { BarChart3, BookOpen, ChevronRight, Home } from "lucide-react";
 import { MetaIcon, TikTokIcon, ShopeeIcon2 } from "@/components/icons";
 import { cn } from "@/lib/utils";
+import { ComponentType, SVGProps } from "react";
 
 interface DocsLayoutProps {
   children: React.ReactNode;
 }
 
-const navigation = [
+interface NavItem {
+  title: string;
+  href: string;
+  icon: ComponentType<{ className?: string }>;
+}
+
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const navigation: NavSection[] = [
   {
     title: "Getting Started",
     items: [
